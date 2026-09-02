@@ -94,9 +94,14 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     try {
       const savedName = localStorage.getItem('teals_lead_name');
       const savedEmail = localStorage.getItem('teals_lead_email');
+      const submitted = localStorage.getItem('teals_lead_submitted');
       if (savedName) setUserName(savedName);
       if (savedEmail) setUserEmail(savedEmail);
-      setHasSubmittedLead(false);
+      if (savedName && savedEmail && submitted === 'true') {
+        setHasSubmittedLead(true);
+      } else {
+        setHasSubmittedLead(false);
+      }
 
       const rawConvList = localStorage.getItem('teals_visitor_conv_list');
       if (rawConvList) {
@@ -299,6 +304,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       })
       .on('broadcast', { event: 'stats_reset' }, () => {
         try {
+          localStorage.removeItem('teals_lead_submitted');
           localStorage.removeItem('teals_active_conv_id');
           localStorage.removeItem('teals_visitor_conv_list');
           localStorage.removeItem('teals_lead_name');
@@ -311,13 +317,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         setUserEmail('');
         setIsHumanConnected(false);
         setAgentName(null);
+        setViewingHistory(false);
         setMessages([
           {
             id: 'init-greet',
             sender_type: 'ai',
             sender_name: 'Teals AI Agent',
             content: DEFAULT_GREETING,
-            created_at: new Date().toISOString()
+            seq: 1,
+            status: 'read'
           }
         ]);
       })
@@ -442,6 +450,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     try {
       localStorage.setItem('teals_lead_name', cleanName);
       localStorage.setItem('teals_lead_email', cleanEmail);
+      localStorage.setItem('teals_lead_submitted', 'true');
     } catch {}
 
     const initialConv = {
@@ -457,7 +466,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     });
 
     setHasSubmittedLead(true);
-    setViewingHistory(false);
+    setViewingHistory(true);
 
     try {
       await fetch('/api/visitor/track', {
@@ -685,7 +694,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           <div onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(false);
+            setViewingHistory(true);
           }} className="flex items-center space-x-2">
             <span className="text-xs font-semibold text-gray-800">{DEFAULT_GREETING}</span>
           </div>
@@ -708,7 +717,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(false);
+            setViewingHistory(true);
           }}
           className="w-14 h-14 rounded-full bg-white border-2 border-white shadow-2xl hover:scale-105 transition-all flex items-center justify-center relative group p-0 overflow-hidden"
           style={{ background: 'transparent' }}
