@@ -208,50 +208,54 @@ class GranularStore {
   }
 
   async getConversation(convId: string): Promise<StoreConversation | null> {
-    const cached = this.convCache.get(convId);
-    if (cached && cached.messages && cached.messages.length > 0) {
-      return cached;
-    }
     try {
       const key = `conversations/${sanitizeKey(convId)}.json`;
       const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(key);
       if (!error && data) {
         const cloudConv: StoreConversation = JSON.parse(await data.text());
+        cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
         this.convCache.set(convId, cloudConv);
         return cloudConv;
       }
     } catch {}
+    const cached = this.convCache.get(convId);
     if (cached) return cached;
     return null;
   }
 
   async saveConversation(conv: StoreConversation): Promise<StoreConversation> {
     const key = `conversations/${sanitizeKey(conv.id)}.json`;
-    const cached = this.convCache.get(conv.id);
+    let cloudConv: StoreConversation | null = null;
+
+    try {
+      const { data } = await supabaseAdmin.storage.from(BUCKET).download(key);
+      if (data) {
+        cloudConv = JSON.parse(await data.text());
+      }
+    } catch {}
 
     const msgMap = new Map<string, StoreMessage>();
-    if (cached?.messages) {
-      cached.messages.forEach(m => msgMap.set(m.id, m));
+    if (cloudConv?.messages) {
+      cloudConv.messages.forEach(m => msgMap.set(m.id, m));
     }
     (conv.messages || []).forEach(m => msgMap.set(m.id, m));
 
     const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
 
-    const isClaimed = !!(conv.assigned_agent_id || cached?.assigned_agent_id || conv.assigned_agent_name || cached?.assigned_agent_name);
+    const isClaimed = !!(conv.assigned_agent_id || cloudConv?.assigned_agent_id || conv.assigned_agent_name || cloudConv?.assigned_agent_name);
     const mergedConv: StoreConversation = {
-      ...(cached || {}),
+      ...(cloudConv || {}),
       ...conv,
-      mode: isClaimed || conv.mode === 'human' || cached?.mode === 'human' ? 'human' : 'ai',
-      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cached?.status === 'pending_agent' ? 'pending_agent' : 'active'),
-      assigned_agent_id: conv.assigned_agent_id || cached?.assigned_agent_id,
-      assigned_agent_name: conv.assigned_agent_name || cached?.assigned_agent_name,
-      assigned_agent_email: conv.assigned_agent_email || cached?.assigned_agent_email,
+      mode: isClaimed || conv.mode === 'human' || cloudConv?.mode === 'human' ? 'human' : 'ai',
+      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cloudConv?.status === 'pending_agent' ? 'pending_agent' : 'active'),
+      assigned_agent_id: conv.assigned_agent_id || cloudConv?.assigned_agent_id,
+      assigned_agent_name: conv.assigned_agent_name || cloudConv?.assigned_agent_name,
+      assigned_agent_email: conv.assigned_agent_email || cloudConv?.assigned_agent_email,
       messages: mergedMessages,
       updated_at: new Date().toISOString()
     };
 
     this.convCache.set(conv.id, mergedConv);
-    this.lastActiveSyncTime = 0;
 
     try {
       await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
@@ -272,14 +276,12 @@ class GranularStore {
     pageViews: number;
   }> {
     const now = Date.now();
-    // 25-second heartbeat timeout - widget pings every 3.5s, so 25s allows ~7 missed pings before dropout
     const HEARTBEAT_TIMEOUT = 25 * 1000;
+    const allSessions: StoreVisitorSession[] = [];
+    const allConvs: StoreConversation[] = [];
 
     try {
-      if (now - this.lastActiveSyncTime > 2500) {
-        this.lastActiveSyncTime = now;
-        // 1. Sync Sessions with Storage
-        const validSessionIds = new Set<string>();
+      // 1. Download all sessions
       const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions', { limit: 100 });
       if (sFiles && sFiles.length > 0) {
         await Promise.all(sFiles.map(async (f) => {
@@ -287,21 +289,14 @@ class GranularStore {
             const { data } = await supabaseAdmin.storage.from(BUCKET).download(`sessions/${f.name}`);
             if (data) {
               const s: StoreVisitorSession = JSON.parse(await data.text());
-              validSessionIds.add(s.id);
+              allSessions.push(s);
               this.sessionCache.set(s.id, s);
             }
           } catch {}
         }));
       }
-      // Purge sessions from memory that are no longer in storage
-      Array.from(this.sessionCache.keys()).forEach((id) => {
-        if (!validSessionIds.has(id)) {
-          this.sessionCache.delete(id);
-        }
-      });
 
-      // 2. Sync Conversations with Storage with Non-Destructive Message Union
-      const validConvIds = new Set<string>();
+      // 2. Download all conversations
       const { data: cFiles } = await supabaseAdmin.storage.from(BUCKET).list('conversations', { limit: 100 });
       if (cFiles && cFiles.length > 0) {
         await Promise.all(cFiles.map(async (f) => {
@@ -309,53 +304,19 @@ class GranularStore {
             const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
             if (data) {
               const c: StoreConversation = JSON.parse(await data.text());
-              validConvIds.add(c.id);
-              
-              const existing = this.convCache.get(c.id);
-              if (existing) {
-                const msgMap = new Map<string, StoreMessage>();
-                (c.messages || []).forEach(m => msgMap.set(m.id, m));
-                (existing.messages || []).forEach(m => msgMap.set(m.id, m));
-                const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
-                const isClaimed = !!(c.assigned_agent_id || existing.assigned_agent_id || c.assigned_agent_name || existing.assigned_agent_name);
-                const effectiveAssignedId = c.assigned_agent_id || existing.assigned_agent_id;
-                const effectiveAssignedName = c.assigned_agent_name || existing.assigned_agent_name;
-                const effectiveAssignedEmail = c.assigned_agent_email || existing.assigned_agent_email;
-                const effectiveMode: 'ai' | 'human' = isClaimed || c.mode === 'human' || existing.mode === 'human' ? 'human' : 'ai';
-                const effectiveStatus: 'active' | 'pending_agent' | 'closed' = isClaimed ? 'active' : (c.status === 'pending_agent' || existing.status === 'pending_agent' ? 'pending_agent' : 'active');
-
-                this.convCache.set(c.id, {
-                  ...existing,
-                  ...c,
-                  visitor_name: c.visitor_name || existing.visitor_name,
-                  visitor_email: c.visitor_email || existing.visitor_email,
-                  mode: effectiveMode,
-                  status: effectiveStatus,
-                  assigned_agent_id: effectiveAssignedId,
-                  assigned_agent_name: effectiveAssignedName,
-                  assigned_agent_email: effectiveAssignedEmail,
-                  messages: mergedMessages
-                });
-              } else {
-                this.convCache.set(c.id, c);
-              }
+              c.messages = sortMessagesChronologically(c.messages || []);
+              allConvs.push(c);
+              this.convCache.set(c.id, c);
             }
           } catch {}
         }));
-      }
-        // Purge conversations from memory that are no longer in storage
-        Array.from(this.convCache.keys()).forEach((id) => {
-          if (!validConvIds.has(id)) {
-            this.convCache.delete(id);
-          }
-        });
       }
     } catch (e) {
       console.error('Sync error:', e);
     }
 
-    const allSessions = Array.from(this.sessionCache.values()).filter(s => s.property_slug === propertySlug);
-    const rawLiveSessions = allSessions.filter(s => {
+    const filteredSessions = allSessions.filter(s => s.property_slug === propertySlug);
+    const rawLiveSessions = filteredSessions.filter(s => {
       const lastActive = new Date(s.last_active_at).getTime();
       return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
     });
@@ -375,7 +336,7 @@ class GranularStore {
     const currentTodaySet = new Set<string>();
     const currentAllTimeSet = new Set<string>();
     
-    allSessions.forEach(s => {
+    filteredSessions.forEach(s => {
       const ip = s.ip_address || s.id;
       if (ip) {
         currentAllTimeSet.add(ip);
@@ -398,9 +359,8 @@ class GranularStore {
     this.todayIps.set(today, currentTodaySet);
     this.allTimeIps = currentAllTimeSet;
 
-    const allConvs = Array.from(this.convCache.values()).filter(c => !c.property_slug || c.property_slug === propertySlug);
-    // Return all active and historic conversations so admin refresh never loses chats
-    const activeConversations = allConvs.filter(c => {
+    const filteredConvs = allConvs.filter(c => !c.property_slug || c.property_slug === propertySlug);
+    const activeConversations = filteredConvs.filter(c => {
       return (c.messages && c.messages.length > 0) || !!c.visitor_name || c.mode === 'human' || c.status === 'pending_agent' || !!c.assigned_agent_id;
     });
 
