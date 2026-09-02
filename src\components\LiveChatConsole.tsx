@@ -478,27 +478,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
       });
     });
 
-    // Direct WebSocket broadcast to visitor widget (sub-5ms!)
-    channelRef.current?.send({
-      type: 'broadcast',
-      event: 'chat_message',
-      payload: {
-        conversationId: selectedConv.id,
-        message: optimisticMsg,
-        conversation: {
-          ...selectedConv,
-          mode: 'human',
-          assigned_agent_id: currentAgent.id,
-          assigned_agent_name: currentAgent.full_name,
-          assigned_agent_email: currentAgent.email,
-          messages: [...messages, optimisticMsg]
-        },
-        isHandoffRequested: false
-      }
-    });
-
     try {
-      await fetch('/api/chat/message', {
+      const res = await fetch('/api/chat/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -510,6 +491,25 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
           isWhisper: isWhisperMode
         })
       });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.message) {
+          setMessages((prev) => {
+            const map = new Map();
+            prev.forEach(m => map.set(m.id, m));
+            map.set(data.message.id, data.message);
+            return Array.from(map.values()).sort((a, b) => {
+              if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
+                return a.seq - b.seq;
+              }
+              const timeA = new Date(a.created_at || 0).getTime();
+              const timeB = new Date(b.created_at || 0).getTime();
+              return timeA - timeB;
+            });
+          });
+        }
+      }
     } catch (err) {
       console.error(err);
     } finally {

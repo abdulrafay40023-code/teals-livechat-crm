@@ -252,23 +252,26 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             return timeA - timeB;
           });
 
-          const effectiveAssignedId = prevConv.assigned_agent_id || apiConv.assigned_agent_id;
-          const effectiveAssignedName = prevConv.assigned_agent_name || apiConv.assigned_agent_name;
+          const effectiveAssignedId = apiConv.assigned_agent_id || prevConv.assigned_agent_id;
+          const effectiveAssignedName = apiConv.assigned_agent_name || prevConv.assigned_agent_name;
+          const effectiveAssignedEmail = apiConv.assigned_agent_email || prevConv.assigned_agent_email;
           const isClaimed = !!effectiveAssignedId || !!effectiveAssignedName;
 
-          const effectiveMode: 'ai' | 'human' = isClaimed || prevConv.mode === 'human' || apiConv.mode === 'human' ? 'human' : 'ai';
+          const effectiveMode: 'ai' | 'human' = isClaimed || apiConv.mode === 'human' || prevConv.mode === 'human' ? 'human' : 'ai';
           const effectiveStatus: 'active' | 'pending_agent' | 'closed' = isClaimed 
             ? 'active'
             : (apiConv.status === 'pending_agent' || prevConv.status === 'pending_agent' ? 'pending_agent' : 'active');
 
           const merged: LiveConversation = {
-            ...apiConv,
             ...prevConv,
+            ...apiConv,
+            visitor_name: apiConv.visitor_name || prevConv.visitor_name,
+            visitor_email: apiConv.visitor_email || prevConv.visitor_email,
             mode: effectiveMode,
             status: effectiveStatus,
             assigned_agent_id: effectiveAssignedId,
             assigned_agent_name: effectiveAssignedName,
-            assigned_agent_email: prevConv.assigned_agent_email || apiConv.assigned_agent_email,
+            assigned_agent_email: effectiveAssignedEmail,
             messages: mergedMessages
           };
           return merged;

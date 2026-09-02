@@ -326,17 +326,24 @@ class GranularStore {
                 const msgMap = new Map<string, StoreMessage>();
                 (c.messages || []).forEach(m => msgMap.set(m.id, m));
                 (existing.messages || []).forEach(m => msgMap.set(m.id, m));
-                const isClaimed = !!(existing.assigned_agent_id || c.assigned_agent_id || existing.assigned_agent_name || c.assigned_agent_name);
                 const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
+                const isClaimed = !!(c.assigned_agent_id || existing.assigned_agent_id || c.assigned_agent_name || existing.assigned_agent_name);
+                const effectiveAssignedId = c.assigned_agent_id || existing.assigned_agent_id;
+                const effectiveAssignedName = c.assigned_agent_name || existing.assigned_agent_name;
+                const effectiveAssignedEmail = c.assigned_agent_email || existing.assigned_agent_email;
+                const effectiveMode: 'ai' | 'human' = isClaimed || c.mode === 'human' || existing.mode === 'human' ? 'human' : 'ai';
+                const effectiveStatus: 'active' | 'pending_agent' | 'closed' = isClaimed ? 'active' : (c.status === 'pending_agent' || existing.status === 'pending_agent' ? 'pending_agent' : 'active');
 
                 this.convCache.set(c.id, {
-                  ...c,
                   ...existing,
-                  mode: isClaimed || existing.mode === 'human' || c.mode === 'human' ? 'human' : 'ai',
-                  status: isClaimed ? 'active' : (existing.status === 'pending_agent' || c.status === 'pending_agent' ? 'pending_agent' : 'active'),
-                  assigned_agent_id: existing.assigned_agent_id || c.assigned_agent_id,
-                  assigned_agent_name: existing.assigned_agent_name || c.assigned_agent_name,
-                  assigned_agent_email: existing.assigned_agent_email || c.assigned_agent_email,
+                  ...c,
+                  visitor_name: c.visitor_name || existing.visitor_name,
+                  visitor_email: c.visitor_email || existing.visitor_email,
+                  mode: effectiveMode,
+                  status: effectiveStatus,
+                  assigned_agent_id: effectiveAssignedId,
+                  assigned_agent_name: effectiveAssignedName,
+                  assigned_agent_email: effectiveAssignedEmail,
                   messages: mergedMessages
                 });
               } else {

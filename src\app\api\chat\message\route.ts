@@ -88,8 +88,10 @@ export async function POST(req: NextRequest) {
         ]
       };
     } else {
-      if (senderName && senderName !== 'Visitor' && senderName !== 'You') conv.visitor_name = senderName;
-      if (senderEmail) conv.visitor_email = senderEmail;
+      if (senderType === 'visitor') {
+        if (senderName && senderName !== 'Visitor' && senderName !== 'You') conv.visitor_name = senderName;
+        if (senderEmail) conv.visitor_email = senderEmail;
+      }
     }
 
     const isFirstVisitorMsg = senderType === 'visitor' && (!conv.messages || conv.messages.filter(m => m.sender_type === 'visitor').length === 0);
