@@ -95,11 +95,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     try {
       const savedName = localStorage.getItem('teals_lead_name');
       const savedEmail = localStorage.getItem('teals_lead_email');
-      if (savedName && savedEmail) {
-        setUserName(savedName);
-        setUserEmail(savedEmail);
-        setHasSubmittedLead(true);
-      }
+      if (savedName) setUserName(savedName);
+      if (savedEmail) setUserEmail(savedEmail);
+      setHasSubmittedLead(false);
 
       const rawConvList = localStorage.getItem('teals_visitor_conv_list');
       if (rawConvList) {
