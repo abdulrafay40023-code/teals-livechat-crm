@@ -22,8 +22,6 @@ export default function ChatsPage() {
         setCurrentAgent(JSON.parse(rawSession));
       } catch {}
     }
-    // Clear unread badge when admin opens Active Chats
-    resetUnreadCount();
   }, []);
 
   const handleClaimSuccess = async () => {

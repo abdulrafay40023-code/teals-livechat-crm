@@ -86,6 +86,19 @@ interface LiveSyncContextType {
 
 const LiveSyncContext = createContext<LiveSyncContextType | undefined>(undefined);
 
+const getUserStorageKey = () => {
+  if (typeof window === 'undefined') return 'teals_read_map_default';
+  try {
+    const raw = localStorage.getItem('teals_agent_session');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.email) return `teals_read_map_${parsed.email.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+      if (parsed.id) return `teals_read_map_${parsed.id}`;
+    }
+  } catch {}
+  return 'teals_read_map_default';
+};
+
 export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [liveVisitors, setLiveVisitors] = useState<LiveVisitor[]>([]);
   const [conversations, setConversations] = useState<LiveConversation[]>([]);
@@ -97,15 +110,19 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const soundEnabledRef = useRef<boolean>(true);
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [readConvMap, setReadConvMap] = useState<Record<string, string>>(() => {
+
+  const [readConvMap, setReadConvMap] = useState<Record<string, string>>({});
+
+  // Load per-user read map on client mount
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('teals_read_conv_map');
-        return saved ? JSON.parse(saved) : {};
+        const key = getUserStorageKey();
+        const saved = localStorage.getItem(key);
+        if (saved) setReadConvMap(JSON.parse(saved));
       } catch {}
     }
-    return {};
-  });
+  }, []);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
@@ -151,11 +168,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!convId) return;
 
     const nowIso = new Date().toISOString();
+    const storageKey = getUserStorageKey();
+
     setReadConvMap(rMap => {
       const next = { ...rMap, [convId]: nowIso };
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('teals_read_conv_map', JSON.stringify(next));
+          localStorage.setItem(storageKey, JSON.stringify(next));
         } catch {}
       }
       return next;
@@ -169,6 +188,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       } catch {}
     }
 
+    // Inform visitor widget that an agent has seen their message
     channelRef.current?.send({
       type: 'broadcast',
       event: 'chat_read',
@@ -487,7 +507,9 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (!rMap[conversation.id]) return rMap;
             const next = { ...rMap };
             delete next[conversation.id];
-            try { localStorage.setItem('teals_read_conv_map', JSON.stringify(next)); } catch {}
+            if (typeof window !== 'undefined') {
+              try { localStorage.setItem(getUserStorageKey(), JSON.stringify(next)); } catch {}
+            }
             return next;
           });
         }
@@ -516,16 +538,14 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const cId = (raw as Record<string, unknown>)?.conversationId as string;
         const readerType = (raw as Record<string, unknown>)?.readerType as string;
 
-        if (cId) {
+        // If a visitor read an agent/AI message, mark agent message as read
+        if (cId && readerType === 'visitor') {
           setConversations(prev => prev.map(c => {
             if (c.id !== cId) return c;
             return {
               ...c,
               messages: (c.messages || []).map(m => {
-                if (readerType === 'visitor' && (m.sender_type === 'agent' || m.sender_type === 'ai')) {
-                  return { ...m, status: 'read' as const };
-                }
-                if ((readerType === 'agent' || readerType === 'admin') && m.sender_type === 'visitor') {
+                if (m.sender_type === 'agent' || m.sender_type === 'ai') {
                   return { ...m, status: 'read' as const };
                 }
                 return m;
