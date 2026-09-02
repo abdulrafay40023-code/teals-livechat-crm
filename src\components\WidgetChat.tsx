@@ -431,7 +431,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
     return () => {
       channelRef.current = null;
-      channel.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [conversationId]);
 

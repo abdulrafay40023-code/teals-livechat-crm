@@ -225,11 +225,23 @@ class GranularStore {
     return null;
   }
 
-  async saveConversation(conv: StoreConversation): Promise<void> {
+  async saveConversation(conv: StoreConversation): Promise<StoreConversation> {
     const key = `conversations/${sanitizeKey(conv.id)}.json`;
-    const cached = this.convCache.get(conv.id);
+    let cloudConv: StoreConversation | null = null;
 
+    try {
+      const { data } = await supabaseAdmin.storage.from(BUCKET).download(key);
+      if (data) {
+        cloudConv = JSON.parse(await data.text());
+      }
+    } catch {}
+
+    const cached = this.convCache.get(conv.id);
     const msgMap = new Map<string, StoreMessage>();
+
+    if (cloudConv?.messages) {
+      cloudConv.messages.forEach(m => msgMap.set(m.id, m));
+    }
     if (cached?.messages) {
       cached.messages.forEach(m => msgMap.set(m.id, m));
     }
@@ -237,17 +249,20 @@ class GranularStore {
 
     const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
 
-    const isClaimed = !!(conv.assigned_agent_id || cached?.assigned_agent_id || conv.assigned_agent_name || cached?.assigned_agent_name);
+    const isClaimed = !!(conv.assigned_agent_id || cached?.assigned_agent_id || cloudConv?.assigned_agent_id || conv.assigned_agent_name || cached?.assigned_agent_name || cloudConv?.assigned_agent_name);
     const mergedConv: StoreConversation = {
+      ...(cloudConv || {}),
       ...(cached || {}),
       ...conv,
-      mode: isClaimed || conv.mode === 'human' || cached?.mode === 'human' ? 'human' : 'ai',
-      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cached?.status === 'pending_agent' ? 'pending_agent' : 'active'),
+      mode: isClaimed || conv.mode === 'human' || cached?.mode === 'human' || cloudConv?.mode === 'human' ? 'human' : 'ai',
+      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cached?.status === 'pending_agent' || cloudConv?.status === 'pending_agent' ? 'pending_agent' : 'active'),
+      assigned_agent_id: conv.assigned_agent_id || cached?.assigned_agent_id || cloudConv?.assigned_agent_id,
+      assigned_agent_name: conv.assigned_agent_name || cached?.assigned_agent_name || cloudConv?.assigned_agent_name,
+      assigned_agent_email: conv.assigned_agent_email || cached?.assigned_agent_email || cloudConv?.assigned_agent_email,
       messages: mergedMessages,
       updated_at: new Date().toISOString()
     };
 
-    // Immediately update memory cache so all concurrent requests see new messages instantly
     this.convCache.set(conv.id, mergedConv);
 
     try {
@@ -258,6 +273,7 @@ class GranularStore {
     } catch (e) {
       console.error('Error saving merged conversation:', e);
     }
+    return mergedConv;
   }
 
   async getAllActiveData(propertySlug = 'teals-crm'): Promise<{

@@ -211,7 +211,7 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     return () => {
       clearInterval(interval);
       channelRef.current = null;
-      channel.unsubscribe();
+      supabase.removeChannel(channel);
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
