@@ -22,10 +22,10 @@ interface SavedConvSummary {
   updatedAt: string;
 }
 
-const dedupeMessages = (list: any[]) => {
+const dedupeMessages = (incomingList: any[]) => {
   const map = new Map<string, any>();
   let seenGreet = false;
-  list.forEach(m => {
+  incomingList.forEach(m => {
     if (!m) return;
     const isGreet = m.sender_type === 'ai' && (m.id === 'init-greet' || (typeof m.id === 'string' && m.id.startsWith('init-greet')) || m.content?.trim() === DEFAULT_GREETING.trim());
     if (isGreet) {
@@ -43,7 +43,27 @@ const dedupeMessages = (list: any[]) => {
     map.set(m.id, m);
   });
 
-  return Array.from(map.values()).sort((a, b) => {
+  const result = Array.from(map.values());
+  return result.sort((a, b) => {
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+    if (isAiGreetA && !isAiGreetB) return -1;
+    if (!isAiGreetA && isAiGreetB) return 1;
+
+    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
+    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
+    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
+    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
+
+    if (isTransferA && isClaimB) return -1;
+    if (isClaimA && isTransferB) return 1;
+
+    if (isTransferA && b.sender_type === 'agent') return -1;
+    if (isTransferB && a.sender_type === 'agent') return 1;
+
+    if (isClaimA && b.sender_type === 'agent') return -1;
+    if (isClaimB && a.sender_type === 'agent') return 1;
+
     const seqA = typeof a.seq === 'number' ? a.seq : 999999;
     const seqB = typeof b.seq === 'number' ? b.seq : 999999;
     if (seqA !== seqB) {
@@ -89,8 +109,16 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   const [isHumanConnected, setIsHumanConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const widgetChatContainerRef = useRef<HTMLDivElement>(null);
+  const isWidgetUserScrolledUp = useRef<boolean>(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  const handleWidgetScroll = () => {
+    if (!widgetChatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = widgetChatContainerRef.current;
+    isWidgetUserScrolledUp.current = scrollHeight - scrollTop - clientHeight > 80;
+  };
 
   // Load saved lead details and previous conversation IDs on mount
   useEffect(() => {
@@ -405,7 +433,14 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   }, [conversationId]);
 
   useEffect(() => {
+    isWidgetUserScrolledUp.current = false;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!isWidgetUserScrolledUp.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages, agentTypingText]);
 
   useEffect(() => {
@@ -951,6 +986,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             <>
               {/* Chat Stream */}
               <div 
+                ref={widgetChatContainerRef}
+                onScroll={handleWidgetScroll}
                 className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-[#0a0f1c] scroll-smooth overscroll-contain"
                 style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
               >

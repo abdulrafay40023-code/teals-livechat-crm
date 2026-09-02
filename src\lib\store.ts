@@ -84,13 +84,41 @@ function getTodayKey(): string {
   }).format(now); // Returns 'YYYY-MM-DD' strictly in PKT
 }
 
-export const sortMessagesChronologically = <T extends { created_at?: string; seq?: number }>(messages: T[]): T[] => {
-  return [...messages].sort((a, b) => {
+export const sortMessagesChronologically = <T extends { id?: string; created_at?: string; seq?: number; sender_type?: string; content?: string }>(messages: T[]): T[] => {
+  const map = new Map<string, T>();
+  messages.forEach(m => {
+    if (!m || !m.id) return;
+    map.set(m.id, m);
+  });
+
+  const list = Array.from(map.values());
+
+  return list.sort((a, b) => {
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+    if (isAiGreetA && !isAiGreetB) return -1;
+    if (!isAiGreetA && isAiGreetB) return 1;
+
+    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
+    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
+    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
+    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
+
+    if (isTransferA && isClaimB) return -1;
+    if (isClaimA && isTransferB) return 1;
+
+    if (isTransferA && b.sender_type === 'agent') return -1;
+    if (isTransferB && a.sender_type === 'agent') return 1;
+
+    if (isClaimA && b.sender_type === 'agent') return -1;
+    if (isClaimB && a.sender_type === 'agent') return 1;
+
     const seqA = typeof a.seq === 'number' ? a.seq : 999999;
     const seqB = typeof b.seq === 'number' ? b.seq : 999999;
     if (seqA !== seqB) {
       return seqA - seqB;
     }
+
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     return timeA - timeB;

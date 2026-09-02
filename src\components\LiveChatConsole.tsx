@@ -114,13 +114,33 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const isNeedsClaim = !isClaimedByMe && !isClaimedByOther && (selectedConv?.mode === 'human' || selectedConv?.status === 'pending_agent');
   const isAiAutomated = !isClaimedByMe && !isClaimedByOther && selectedConv?.mode === 'ai' && selectedConv?.status !== 'pending_agent';
 
-const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?: string }>(msgs: T[]): T[] => {
+const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?: string; sender_type?: string; content?: string }>(msgs: T[]): T[] => {
   const map = new Map<string, T>();
   msgs.forEach(m => {
     if (!m || !m.id) return;
     map.set(m.id, m);
   });
-  return Array.from(map.values()).sort((a, b) => {
+  const list = Array.from(map.values());
+  return list.sort((a, b) => {
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+    if (isAiGreetA && !isAiGreetB) return -1;
+    if (!isAiGreetA && isAiGreetB) return 1;
+
+    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
+    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
+    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
+    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
+
+    if (isTransferA && isClaimB) return -1;
+    if (isClaimA && isTransferB) return 1;
+
+    if (isTransferA && b.sender_type === 'agent') return -1;
+    if (isTransferB && a.sender_type === 'agent') return 1;
+
+    if (isClaimA && b.sender_type === 'agent') return -1;
+    if (isClaimB && a.sender_type === 'agent') return 1;
+
     const seqA = typeof a.seq === 'number' ? a.seq : 999999;
     const seqB = typeof b.seq === 'number' ? b.seq : 999999;
     if (seqA !== seqB) {
@@ -132,11 +152,21 @@ const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?:
   });
 };
 
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isUserScrolledUp = useRef<boolean>(false);
+
+  const handleChatScroll = () => {
+    if (!chatContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContainerRef.current;
+    isUserScrolledUp.current = scrollHeight - scrollTop - clientHeight > 80;
+  };
+
   // Real-Time Direct WebSocket Stream for Messages & Keystrokes
   useEffect(() => {
     const targetId = selectedConv?.id;
     if (!targetId || (isClaimedByOther && !isAdmin)) return;
     setClaimError(null);
+    isUserScrolledUp.current = false;
 
     const channel = supabase.channel(REALTIME_CHANNEL, {
       config: { broadcast: { self: true } }
@@ -203,24 +233,21 @@ const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?:
       onMarkRead?.(targetId);
     }
 
-    // Initial message load with Non-Destructive Merge
+    // Scoped message load strictly for targetId (never merge stale messages from other chats)
     const fetchMsgs = async () => {
       try {
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
           if (data.messages && Array.isArray(data.messages)) {
-            setMessages((prev) => {
-              const combined = [...data.messages, ...prev];
-              return sortTimelineMessages(combined);
-            });
+            setMessages(sortTimelineMessages(data.messages));
           }
         }
       } catch {}
     };
 
     fetchMsgs();
-    const interval = setInterval(fetchMsgs, 2500);
+    const interval = setInterval(fetchMsgs, 4000);
 
     return () => {
       clearInterval(interval);
@@ -235,33 +262,24 @@ const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?:
       if (selectedConv.id) {
         onMarkRead?.(selectedConv.id);
       }
-      setMessages((prev) => {
-        const map = new Map();
-        prev.forEach(m => map.set(m.id, m));
-        selectedConv.messages!.forEach(m => map.set(m.id, m));
-        return Array.from(map.values()).sort((a, b) => {
-          if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-            return a.seq - b.seq;
-          }
-          const timeA = new Date(a.created_at || 0).getTime();
-          const timeB = new Date(b.created_at || 0).getTime();
-          return timeA - timeB;
-        });
-      });
+      setMessages(sortTimelineMessages(selectedConv.messages));
 
       const last = selectedConv.messages[selectedConv.messages.length - 1];
       if (last && last.sender_type === 'visitor') {
         setLiveTypingPreview(null);
       }
     }
-  }, [selectedConv?.messages]);
+  }, [selectedConv?.id]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Only auto-scroll if user is near the bottom
+    if (!isUserScrolledUp.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   useEffect(() => {
-    if (liveTypingPreview) {
+    if (liveTypingPreview && !isUserScrolledUp.current) {
       typingPreviewEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [liveTypingPreview]);
@@ -753,7 +771,11 @@ const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?:
               ) : (
                 <>
                   {/* Message Stream */}
-                  <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+                  <div
+                    ref={chatContainerRef}
+                    onScroll={handleChatScroll}
+                    className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
+                  >
                     {messages.map((m) => {
                       const isVisitor = m.sender_type === 'visitor';
                       const isSystem = m.sender_type === 'system';
