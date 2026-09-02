@@ -76,14 +76,14 @@ export async function POST(req: NextRequest) {
         updated_at: now,
         messages: [
           {
-            id: 'init-greet-' + convId,
+            id: 'init-greet',
             conversation_id: convId,
             sender_type: 'ai',
             sender_name: 'Teals AI Agent',
             content: "Hey! How can I help you with Teals CRM today?",
             is_whisper: false,
             seq: 1,
-            created_at: '2020-01-01T00:00:00.000Z'
+            created_at: now
           }
         ]
       };

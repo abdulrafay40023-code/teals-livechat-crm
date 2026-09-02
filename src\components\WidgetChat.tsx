@@ -36,7 +36,7 @@ const dedupeMessages = (list: any[]) => {
         id: 'init-greet',
         seq: 1,
         status: 'read',
-        created_at: m.created_at || '2020-01-01T00:00:00.000Z'
+        created_at: m.created_at
       });
       return;
     }
@@ -77,8 +77,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       sender_name: 'Teals AI Agent',
       content: DEFAULT_GREETING,
       seq: 1,
-      status: 'read',
-      created_at: '2020-01-01T00:00:00.000Z'
+      status: 'read'
     }
   ]);
   const [inputText, setInputText] = useState('');
