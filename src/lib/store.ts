@@ -70,7 +70,24 @@ export interface StoreAgent {
 }
 
 function sanitizeKey(k: string): string {
-  return k.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return (k || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
+async function parseStorageData(data: unknown): Promise<string> {
+  if (!data) return '';
+  const anyData = data as { arrayBuffer?: () => Promise<ArrayBuffer>; text?: () => Promise<string> };
+  if (typeof anyData.arrayBuffer === 'function') {
+    try {
+      const buf = Buffer.from(await anyData.arrayBuffer());
+      return buf.toString('utf-8');
+    } catch {}
+  }
+  if (typeof anyData.text === 'function') {
+    try {
+      return await anyData.text();
+    } catch {}
+  }
+  return String(data);
 }
 
 // Strictly resets at 12:00 AM Pakistan Standard Time (PKT = Asia/Karachi)
@@ -94,34 +111,23 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
   const list = Array.from(map.values());
 
   const sorted = list.sort((a, b) => {
+    // 1. Initial AI Greeting always comes first
     const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && (a.seq === 1 || (a.content || '').includes('Hey! How can I help')));
     const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && (b.seq === 1 || (b.content || '').includes('Hey! How can I help')));
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
-    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
-    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
-    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
-    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
-
-    if (isTransferA && isClaimB) return -1;
-    if (isClaimA && isTransferB) return 1;
-
-    if (isTransferA && b.sender_type === 'agent') return -1;
-    if (isTransferB && a.sender_type === 'agent') return 1;
-
-    if (isClaimA && b.sender_type === 'agent') return -1;
-    if (isClaimB && a.sender_type === 'agent') return 1;
-
-    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
-    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    if (seqA !== seqB) {
-      return seqA - seqB;
-    }
-
+    // 2. Strict chronological order by timestamp
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
-    return timeA - timeB;
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
+
+    // 3. Fallback to sequence number if timestamps are identical
+    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
+    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
+    return seqA - seqB;
   });
 
   return sorted.map((m, idx) => ({
@@ -137,7 +143,7 @@ class GranularStore {
   private todayIps = new Map<string, Set<string>>();
   private allTimeIps = new Set<string>();
   private totalViews = 0;
-  private lastActiveSyncTime = 0;
+  private storageLoaded = false;
 
   constructor() {
     const admin: StoreAgent = {
@@ -173,99 +179,168 @@ class GranularStore {
       const key = `sessions/${sanitizeKey(sessionId)}.json`;
       const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(key);
       if (!error && data) {
-        const session: StoreVisitorSession = JSON.parse(await data.text());
-        this.sessionCache.set(sessionId, session);
-        return session;
+        const text = await parseStorageData(data);
+        if (text) {
+          const session: StoreVisitorSession = JSON.parse(text);
+          this.sessionCache.set(sessionId, session);
+          return session;
+        }
       }
     } catch {}
-    this.sessionCache.delete(sessionId);
     return null;
   }
 
   async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
     this.sessionCache.set(session.id, session);
-    this.lastActiveSyncTime = 0;
     
-    try {
-      const key = `sessions/${sanitizeKey(session.id)}.json`;
-      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
-        upsert: true,
-        contentType: 'application/json'
-      });
-    } catch (e) {
-      console.error('Error saving session:', e);
-    }
+    // Background cloud storage upload (non-blocking)
+    const key = `sessions/${sanitizeKey(session.id)}.json`;
+    supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
+      upsert: true,
+      contentType: 'application/json'
+    }).catch(e => console.error('Cloud save session error:', e));
+
     return session;
   }
 
   async removeSession(sessionId: string): Promise<void> {
     this.sessionCache.delete(sessionId);
-    this.lastActiveSyncTime = 0;
-    try {
-      const key = `sessions/${sanitizeKey(sessionId)}.json`;
-      await supabaseAdmin.storage.from(BUCKET).remove([key]);
-    } catch {}
+    const key = `sessions/${sanitizeKey(sessionId)}.json`;
+    supabaseAdmin.storage.from(BUCKET).remove([key]).catch(() => {});
   }
 
   async getConversation(convId: string): Promise<StoreConversation | null> {
+    const cached = this.convCache.get(convId);
+    if (cached) return cached;
+
     try {
       const key = `conversations/${sanitizeKey(convId)}.json`;
       const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(key);
       if (!error && data) {
-        const cloudConv: StoreConversation = JSON.parse(await data.text());
-        cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
-        this.convCache.set(convId, cloudConv);
-        return cloudConv;
+        const text = await parseStorageData(data);
+        if (text) {
+          const cloudConv: StoreConversation = JSON.parse(text);
+          cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
+          this.convCache.set(convId, cloudConv);
+          return cloudConv;
+        }
       }
     } catch {}
-    const cached = this.convCache.get(convId);
-    if (cached) return cached;
     return null;
   }
 
+  async getConversationsByVisitor(visitorToken: string, email?: string): Promise<StoreConversation[]> {
+    await this.ensureStorageLoaded();
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const allConvs = Array.from(this.convCache.values());
+
+    return allConvs.filter(c => {
+      if (c.id === visitorToken || c.visitor_id === visitorToken) return true;
+      if (cleanEmail && c.visitor_email && c.visitor_email.toLowerCase() === cleanEmail) return true;
+      return false;
+    }).sort((a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime());
+  }
+
   async saveConversation(conv: StoreConversation): Promise<StoreConversation> {
-    const key = `conversations/${sanitizeKey(conv.id)}.json`;
-    let cloudConv: StoreConversation | null = null;
-
-    try {
-      const { data } = await supabaseAdmin.storage.from(BUCKET).download(key);
-      if (data) {
-        cloudConv = JSON.parse(await data.text());
-      }
-    } catch {}
-
+    const existing = this.convCache.get(conv.id);
     const msgMap = new Map<string, StoreMessage>();
-    if (cloudConv?.messages) {
-      cloudConv.messages.forEach(m => msgMap.set(m.id, m));
+
+    if (existing?.messages) {
+      existing.messages.forEach(m => msgMap.set(m.id, m));
     }
     (conv.messages || []).forEach(m => msgMap.set(m.id, m));
 
     const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
+    const isClaimed = !!(conv.assigned_agent_id || existing?.assigned_agent_id || conv.assigned_agent_name || existing?.assigned_agent_name);
 
-    const isClaimed = !!(conv.assigned_agent_id || cloudConv?.assigned_agent_id || conv.assigned_agent_name || cloudConv?.assigned_agent_name);
     const mergedConv: StoreConversation = {
-      ...(cloudConv || {}),
+      ...(existing || {}),
       ...conv,
-      mode: isClaimed || conv.mode === 'human' || cloudConv?.mode === 'human' ? 'human' : 'ai',
-      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cloudConv?.status === 'pending_agent' ? 'pending_agent' : 'active'),
-      assigned_agent_id: conv.assigned_agent_id || cloudConv?.assigned_agent_id,
-      assigned_agent_name: conv.assigned_agent_name || cloudConv?.assigned_agent_name,
-      assigned_agent_email: conv.assigned_agent_email || cloudConv?.assigned_agent_email,
+      mode: isClaimed || conv.mode === 'human' || existing?.mode === 'human' ? 'human' : 'ai',
+      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || existing?.status === 'pending_agent' ? 'pending_agent' : 'active'),
+      assigned_agent_id: conv.assigned_agent_id || existing?.assigned_agent_id,
+      assigned_agent_name: conv.assigned_agent_name || existing?.assigned_agent_name,
+      assigned_agent_email: conv.assigned_agent_email || existing?.assigned_agent_email,
       messages: mergedMessages,
       updated_at: new Date().toISOString()
     };
 
+    // 0ms instant in-memory update
     this.convCache.set(conv.id, mergedConv);
 
-    try {
-      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
-        upsert: true,
-        contentType: 'application/json'
-      });
-    } catch (e) {
-      console.error('Error saving merged conversation:', e);
-    }
+    // Non-blocking background upload to Supabase Storage
+    const key = `conversations/${sanitizeKey(conv.id)}.json`;
+    supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
+      upsert: true,
+      contentType: 'application/json'
+    }).catch(e => console.error('Cloud save conversation error:', e));
+
     return mergedConv;
+  }
+
+  private async ensureStorageLoaded(): Promise<void> {
+    try {
+      // 1. Sync conversations from bucket
+      const { data: cFiles } = await supabaseAdmin.storage.from(BUCKET).list('conversations', { limit: 1000 });
+      const currentConvNames = new Set((cFiles || []).map(f => f.name.replace('.json', '')));
+      
+      // Prune deleted conversations from cache
+      for (const id of Array.from(this.convCache.keys())) {
+        if (!currentConvNames.has(sanitizeKey(id))) {
+          this.convCache.delete(id);
+        }
+      }
+
+      if (cFiles && cFiles.length > 0) {
+        await Promise.all(cFiles.map(async (f) => {
+          try {
+            const id = f.name.replace('.json', '');
+            if (!this.convCache.has(id)) {
+              const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
+              if (data) {
+                const text = await parseStorageData(data);
+                if (text) {
+                  const c: StoreConversation = JSON.parse(text);
+                  c.messages = sortMessagesChronologically(c.messages || []);
+                  this.convCache.set(c.id, c);
+                }
+              }
+            }
+          } catch {}
+        }));
+      }
+
+      // 2. Sync sessions from bucket
+      const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions', { limit: 1000 });
+      const currentSessNames = new Set((sFiles || []).map(f => f.name.replace('.json', '')));
+
+      // Prune deleted sessions from cache
+      for (const id of Array.from(this.sessionCache.keys())) {
+        if (!currentSessNames.has(sanitizeKey(id))) {
+          this.sessionCache.delete(id);
+        }
+      }
+
+      if (sFiles && sFiles.length > 0) {
+        await Promise.all(sFiles.map(async (f) => {
+          try {
+            const id = f.name.replace('.json', '');
+            if (!this.sessionCache.has(id)) {
+              const { data } = await supabaseAdmin.storage.from(BUCKET).download(`sessions/${f.name}`);
+              if (data) {
+                const text = await parseStorageData(data);
+                if (text) {
+                  const s: StoreVisitorSession = JSON.parse(text);
+                  this.sessionCache.set(s.id, s);
+                }
+              }
+            }
+          } catch {}
+        }));
+      }
+    } catch (e) {
+      console.error('Storage sync error:', e);
+    }
   }
 
   async getAllActiveData(propertySlug = 'teals-crm'): Promise<{
@@ -275,45 +350,12 @@ class GranularStore {
     conversations: StoreConversation[];
     pageViews: number;
   }> {
+    await this.ensureStorageLoaded();
+
     const now = Date.now();
     const HEARTBEAT_TIMEOUT = 25 * 1000;
-    const allSessions: StoreVisitorSession[] = [];
-    const allConvs: StoreConversation[] = [];
-
-    try {
-      // 1. Download all sessions
-      const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions', { limit: 100 });
-      if (sFiles && sFiles.length > 0) {
-        await Promise.all(sFiles.map(async (f) => {
-          try {
-            const { data } = await supabaseAdmin.storage.from(BUCKET).download(`sessions/${f.name}`);
-            if (data) {
-              const s: StoreVisitorSession = JSON.parse(await data.text());
-              allSessions.push(s);
-              this.sessionCache.set(s.id, s);
-            }
-          } catch {}
-        }));
-      }
-
-      // 2. Download all conversations
-      const { data: cFiles } = await supabaseAdmin.storage.from(BUCKET).list('conversations', { limit: 100 });
-      if (cFiles && cFiles.length > 0) {
-        await Promise.all(cFiles.map(async (f) => {
-          try {
-            const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
-            if (data) {
-              const c: StoreConversation = JSON.parse(await data.text());
-              c.messages = sortMessagesChronologically(c.messages || []);
-              allConvs.push(c);
-              this.convCache.set(c.id, c);
-            }
-          } catch {}
-        }));
-      }
-    } catch (e) {
-      console.error('Sync error:', e);
-    }
+    const allSessions = Array.from(this.sessionCache.values());
+    const allConvs = Array.from(this.convCache.values());
 
     const filteredSessions = allSessions.filter(s => s.property_slug === propertySlug);
     const rawLiveSessions = filteredSessions.filter(s => {
@@ -381,8 +423,11 @@ class GranularStore {
           try {
             const { data } = await supabaseAdmin.storage.from(BUCKET).download(`agents/${f.name}`);
             if (data) {
-              const a: StoreAgent = JSON.parse(await data.text());
-              this.agents.set(a.email.toLowerCase(), a);
+              const text = await parseStorageData(data);
+              if (text) {
+                const a: StoreAgent = JSON.parse(text);
+                this.agents.set(a.email.toLowerCase(), a);
+              }
             }
           } catch {}
         }));
@@ -412,11 +457,26 @@ class GranularStore {
   incrementPageView(): void {
     this.totalViews += 1;
   }
+
+  async deleteConversation(id: string): Promise<boolean> {
+    if (!id) return false;
+    const cleanId = sanitizeKey(id);
+    this.convCache.delete(id);
+    this.convCache.delete(cleanId);
+    try {
+      const key = `conversations/${cleanId}.json`;
+      await supabaseAdmin.storage.from(BUCKET).remove([key]);
+      return true;
+    } catch (e) {
+      console.error('Error deleting conversation from storage:', e);
+      return false;
+    }
+  }
   
   async clearAllConversations(): Promise<void> {
     this.convCache.clear();
     try {
-      const { data: cFiles } = await supabaseAdmin.storage.from(BUCKET).list('conversations');
+      const { data: cFiles } = await supabaseAdmin.storage.from(BUCKET).list('conversations', { limit: 1000 });
       if (cFiles && cFiles.length > 0) {
         const paths = cFiles.map(f => 'conversations/' + f.name);
         await supabaseAdmin.storage.from(BUCKET).remove(paths);
@@ -429,9 +489,10 @@ class GranularStore {
     this.allTimeIps.clear();
     this.todayIps.clear();
     this.totalViews = 0;
+    this.storageLoaded = false;
 
     try {
-      const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions');
+      const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions', { limit: 1000 });
       if (sFiles && sFiles.length > 0) {
         const paths = sFiles.map(f => 'sessions/' + f.name);
         await supabaseAdmin.storage.from(BUCKET).remove(paths);

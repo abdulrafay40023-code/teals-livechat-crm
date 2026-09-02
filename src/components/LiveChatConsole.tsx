@@ -3,13 +3,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, Send,
-  Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot
+  Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2
 } from 'lucide-react';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { getCountryFlagUrl } from '@/lib/flags';
 import { supabase } from '@/lib/supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
 import { ClaimChatModal } from '@/components/ClaimChatModal';
+import { useLiveSync } from '@/context/LiveSyncContext';
 
 export interface ChatSession {
   id: string;
@@ -80,6 +81,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   // ROLE-BASED VISIBILITY FILTERING
   const isAdmin = currentAgent.role === 'admin' || currentAgent.email === 'garryamelia6265@gmail.com';
 
+  const { readConvMap, deleteConversation } = useLiveSync();
+
   const visibleConversations = conversations.filter((conv) => {
     // 1. ADMIN: Sees EVERYTHING (AI chats, unclaimed human requests, claimed chats)
     if (isAdmin) return true;
@@ -100,6 +103,54 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     // c) Regular agents DO NOT see AI-only conversations!
     return false;
   });
+
+  // Sort visible conversations so the one with the latest message is ALWAYS at the very top (WhatsApp style)
+  const sortedVisibleConversations = [...visibleConversations].sort((a, b) => {
+    const getLatestTime = (c: ChatSession) => {
+      if (c.messages && c.messages.length > 0) {
+        const last = c.messages[c.messages.length - 1];
+        return new Date(last.created_at || c.updated_at || 0).getTime();
+      }
+      return new Date(c.updated_at || 0).getTime();
+    };
+    return getLatestTime(b) - getLatestTime(a);
+  });
+
+  // Calculate unread count for each conversation
+  const getUnreadCountForConv = (conv: ChatSession) => {
+    if (conv.id === selectedChatId) return 0;
+    if (!conv.messages || conv.messages.length === 0) return 0;
+
+    const lastMsg = conv.messages[conv.messages.length - 1];
+    if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'system')) {
+      return 0;
+    }
+
+    let lastAgentIdx = -1;
+    for (let i = conv.messages.length - 1; i >= 0; i--) {
+      if (conv.messages[i].sender_type === 'agent') {
+        lastAgentIdx = i;
+        break;
+      }
+    }
+
+    const pendingVisitorMsgs = conv.messages.slice(lastAgentIdx + 1).filter(m => m.sender_type === 'visitor');
+    if (pendingVisitorMsgs.length === 0) return 0;
+
+    const readVal = readConvMap?.[conv.id];
+    if (!readVal) return pendingVisitorMsgs.length;
+    const readTime = new Date(readVal).getTime();
+    if (isNaN(readTime)) return 0;
+    return pendingVisitorMsgs.filter(m => new Date(m.created_at || 0).getTime() > readTime).length;
+  };
+
+  const handleDeleteChat = async (id: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this chat?')) return;
+    if (selectedChatId === id) {
+      onSelectChat('');
+    }
+    await deleteConversation(id);
+  };
 
   // Manual selection only (no auto-select to preserve list browsing)
   // Search across full conversations list so selected conversation is NEVER dropped during filtering
@@ -127,28 +178,15 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
-    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
-    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
-    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
-    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
-
-    if (isTransferA && isClaimB) return -1;
-    if (isClaimA && isTransferB) return 1;
-
-    if (isTransferA && b.sender_type === 'agent') return -1;
-    if (isTransferB && a.sender_type === 'agent') return 1;
-
-    if (isClaimA && b.sender_type === 'agent') return -1;
-    if (isClaimB && a.sender_type === 'agent') return 1;
+    const timeA = new Date(a.created_at || 0).getTime();
+    const timeB = new Date(b.created_at || 0).getTime();
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
 
     const seqA = typeof a.seq === 'number' ? a.seq : 999999;
     const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    if (seqA !== seqB) {
-      return seqA - seqB;
-    }
-    const timeA = new Date(a.created_at || 0).getTime();
-    const timeB = new Date(b.created_at || 0).getTime();
-    return timeA - timeB;
+    return seqA - seqB;
   });
 };
 
@@ -184,6 +222,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
           // Immediately dismiss sneak-peek preview once message is posted
           if (message?.sender_type === 'visitor') {
             setLiveTypingPreview(null);
+            onMarkRead?.(targetId);
           }
 
           setMessages((prev) => {
@@ -200,7 +239,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         const conv = (raw as Record<string, unknown>)?.conversation as { messages?: Array<{ id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; created_at: string }> };
 
         if (cId === targetId && conv?.messages && Array.isArray(conv.messages)) {
-          setMessages(sortTimelineMessages(conv.messages));
+          setMessages(prev => sortTimelineMessages([...prev, ...conv.messages!]));
         }
       })
       .on('broadcast', { event: 'typing_event' }, (payload: unknown) => {
@@ -227,6 +266,24 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
           setMessages((prev) => prev.map(m => (m.sender_type === 'agent' || m.sender_type === 'ai') ? { ...m, status: 'read' as const } : m));
         }
       })
+      .on('broadcast', { event: 'stats_reset' }, () => {
+        try {
+          Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('teals_agent_cache_')) localStorage.removeItem(k);
+          });
+        } catch {}
+        setMessages([]);
+        setLiveTypingPreview(null);
+      })
+      .on('broadcast', { event: 'system_reset' }, () => {
+        try {
+          Object.keys(localStorage).forEach(k => {
+            if (k.startsWith('teals_agent_cache_')) localStorage.removeItem(k);
+          });
+        } catch {}
+        setMessages([]);
+        setLiveTypingPreview(null);
+      })
       .subscribe();
 
     if (targetId) {
@@ -239,8 +296,8 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.messages && Array.isArray(data.messages)) {
-            setMessages(sortTimelineMessages(data.messages));
+          if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
+            setMessages(prev => sortTimelineMessages([...prev, ...data.messages]));
           }
         }
       } catch {}
@@ -549,7 +606,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-dark-border/40">
-            {visibleConversations.length === 0 ? (
+            {sortedVisibleConversations.length === 0 ? (
               <div className="p-8 text-center text-xs text-dark-muted space-y-2">
                 <AgentAvatar type="ai" size="md" className="mx-auto" />
                 <p className="font-semibold text-white">No pending chats</p>
@@ -560,7 +617,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 </p>
               </div>
             ) : (
-              visibleConversations.map((conv) => {
+              sortedVisibleConversations.map((conv) => {
                 const isSelected = conv.id === selectedConv?.id;
                 const isConvMine = !!(
                   (conv.assigned_agent_id && conv.assigned_agent_id === currentAgent.id) ||
@@ -572,37 +629,55 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
                 const flagSrc = getCountryFlagUrl(conv.visitor?.country_code || 'PK');
                 const lastMsg = conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+                const unreadCount = getUnreadCountForConv(conv);
+                const isTyping = !!(conv.typing_preview && conv.typing_preview.trim().length > 0);
 
                 return (
                   <div
                     key={conv.id}
                     onClick={() => onSelectChat(conv.id)}
-                    className={`p-3.5 cursor-pointer transition-all hover:bg-[#131d33] ${
+                    className={`p-3.5 cursor-pointer transition-all hover:bg-[#131d33] group relative ${
                       isSelected ? 'bg-[#152038] border-l-4 border-brand-primary' : 'bg-transparent'
                     }`}
                   >
                     <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2.5">
+                      <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-2">
                         <img
                           src={flagSrc}
                           alt="Flag"
                           className="w-5 h-3.5 object-cover rounded shadow-sm flex-shrink-0"
                           onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
                         />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <h4 className="text-xs font-bold text-white flex items-center space-x-1 truncate">
-                            <span>{conv.visitor_name}</span>
+                            <span className="truncate">{conv.visitor_name}</span>
                             {conv.visitor_email && (
                               <span className="text-[10px] font-normal text-dark-muted truncate">({conv.visitor_email})</span>
                             )}
                           </h4>
-                          <p className="text-[11px] text-dark-muted truncate max-w-[150px] mt-0.5">
-                            {lastMsg ? lastMsg.content : (conv.visitor?.current_page || '/')}
+                          <p className="text-[11px] text-dark-muted truncate max-w-[170px] mt-0.5">
+                            {isTyping ? (
+                              <span className="text-brand-emerald italic font-medium">typing...</span>
+                            ) : lastMsg ? (
+                              lastMsg.sender_type === 'agent' ? (
+                                <span><span className="text-gray-400">You: </span>{lastMsg.content}</span>
+                              ) : (
+                                <span className={unreadCount > 0 ? 'text-white font-semibold' : 'text-dark-muted'}>{lastMsg.content}</span>
+                              )
+                            ) : (
+                              conv.visitor?.current_page || '/'
+                            )}
                           </p>
                         </div>
                       </div>
 
-                      <div className="text-right flex-shrink-0 ml-2">
+                      <div className="flex items-center space-x-1.5 flex-shrink-0 ml-1">
+                        {unreadCount > 0 && (
+                          <span className="min-w-[18px] h-[18px] px-1.5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40 animate-pulse flex-shrink-0">
+                            {unreadCount}
+                          </span>
+                        )}
+
                         {isConvMine ? (
                           <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/30 flex items-center space-x-1">
                             <Lock className="w-2.5 h-2.5" />
@@ -622,6 +697,19 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                             <Bot className="w-2.5 h-2.5" />
                             <span>AI Active</span>
                           </span>
+                        )}
+
+                        {(isAdmin || isConvMine) && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteChat(conv.id);
+                            }}
+                            title="Delete Chat"
+                            className="p-1 rounded-lg text-dark-muted hover:text-rose-400 hover:bg-rose-500/15 transition-all opacity-0 group-hover:opacity-100"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </div>
@@ -671,7 +759,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                   </div>
                 </div>
 
-                <div>
+                <div className="flex items-center space-x-2">
                   {isNeedsClaim ? (
                     <button
                       onClick={() => setClaimModalOpen(true)}
@@ -707,6 +795,17 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       <Lock className="w-3 h-3" />
                       <span>{selectedConv.assigned_agent_name}</span>
                     </span>
+                  )}
+
+                  {(isAdmin || isClaimedByMe) && (
+                    <button
+                      onClick={() => handleDeleteChat(selectedConv.id)}
+                      title="Delete Conversation"
+                      className="p-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-semibold flex items-center space-x-1 transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Delete</span>
+                    </button>
                   )}
                 </div>
               </div>

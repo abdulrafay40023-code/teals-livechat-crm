@@ -10,7 +10,15 @@ export default function ChatsPage() {
     email: string;
     full_name: string;
     role: string;
-  } | null>(null);
+  }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const rawSession = localStorage.getItem('teals_agent_session');
+        if (rawSession) return JSON.parse(rawSession);
+      } catch {}
+    }
+    return { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' };
+  });
 
   const { conversations, refreshSync, resetUnreadCount, markConversationAsRead } = useLiveSync();
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);

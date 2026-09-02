@@ -77,11 +77,13 @@ interface LiveSyncContextType {
   soundEnabled: boolean;
   unreadCount: number;
   unreadConversationsCount: number;
+  readConvMap: Record<string, string>;
   toggleSound: () => void;
   resetAll: () => Promise<void>;
   refreshSync: () => Promise<void>;
   resetUnreadCount: () => void;
   markConversationAsRead: (convId: string) => void;
+  deleteConversation: (convId: string) => Promise<void>;
 }
 
 const LiveSyncContext = createContext<LiveSyncContextType | undefined>(undefined);
@@ -138,9 +140,21 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     return convList.filter(c => {
       if (!c.messages || c.messages.length === 0) return false;
-      const visitorMsgs = c.messages.filter(m => m.sender_type === 'visitor');
-      if (visitorMsgs.length === 0) return false;
-      const lastVisitorMsg = visitorMsgs[visitorMsgs.length - 1];
+      const lastMsg = c.messages[c.messages.length - 1];
+      // If the latest message is from an agent or system, then the agent has already answered -> not unread
+      if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'system')) return false;
+
+      let lastAgentIdx = -1;
+      for (let i = c.messages.length - 1; i >= 0; i--) {
+        if (c.messages[i].sender_type === 'agent') {
+          lastAgentIdx = i;
+          break;
+        }
+      }
+
+      const pendingVisitorMsgs = c.messages.slice(lastAgentIdx + 1).filter(m => m.sender_type === 'visitor');
+      if (pendingVisitorMsgs.length === 0) return false;
+      const lastVisitorMsg = pendingVisitorMsgs[pendingVisitorMsgs.length - 1];
 
       // If marked read by ID or read timestamp is >= message timestamp
       const readVal = readMap[c.id];
@@ -277,12 +291,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           return merged;
         });
 
-        const apiIds = new Set(convsList.map(c => c.id));
-        const extras = prev.filter(c => !apiIds.has(c.id));
-        const combined = [...mergedList, ...extras];
-
-        setChatCount(combined.length);
-        return combined;
+        setChatCount(mergedList.length);
+        return mergedList;
       });
 
       if (!initialLoadDone.current) {
@@ -446,24 +456,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             };
 
             const isHumanActive = mergedConv.mode === 'human' || mergedConv.status === 'pending_agent' || !!mergedConv.assigned_agent_id;
-
             let updated: LiveConversation[];
             if (isAdmin) {
-              // Admin sees ALL conversations including AI conversations in real-time
-              if (idx >= 0) {
-                updated = [...prev];
-                updated[idx] = mergedConv;
-              } else {
-                updated = [mergedConv, ...prev];
-              }
+              // Admin sees ALL conversations including AI conversations in real-time (newest on top)
+              const other = prev.filter(c => c.id !== conversation.id);
+              updated = [mergedConv, ...other];
             } else {
               if (isHumanActive) {
-                if (idx >= 0) {
-                  updated = [...prev];
-                  updated[idx] = mergedConv;
-                } else {
-                  updated = [mergedConv, ...prev];
-                }
+                const other = prev.filter(c => c.id !== conversation.id);
+                updated = [mergedConv, ...other];
               } else {
                 updated = prev.filter(c => c.id !== conversation.id);
               }
@@ -498,13 +499,10 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const conversation = (raw as Record<string, unknown>)?.conversation as LiveConversation;
         if (conversation && conversation.id) {
           setConversations(prev => {
-            const idx = prev.findIndex(c => c.id === conversation.id);
-            if (idx >= 0) {
-              const updated = [...prev];
-              updated[idx] = { ...prev[idx], ...conversation };
-              return updated;
-            }
-            return [conversation, ...prev];
+            const other = prev.filter(c => c.id !== conversation.id);
+            const existing = prev.find(c => c.id === conversation.id);
+            const merged = existing ? { ...existing, ...conversation } : conversation;
+            return [merged, ...other];
           });
           setReadConvMap(rMap => {
             if (!rMap[conversation.id]) return rMap;
@@ -518,6 +516,23 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         }
         if (soundEnabledRef.current) {
           playVisitorAlertSound();
+        }
+      })
+      .on('broadcast', { event: 'chat_deleted' }, (payload: unknown) => {
+        const raw = (payload as Record<string, unknown>)?.payload || payload;
+        const cId = (raw as Record<string, unknown>)?.conversationId as string;
+        if (cId) {
+          setConversations(prev => prev.filter(c => c.id !== cId));
+          setChatCount(prev => Math.max(0, prev - 1));
+          setReadConvMap(rMap => {
+            if (!rMap[cId]) return rMap;
+            const next = { ...rMap };
+            delete next[cId];
+            if (typeof window !== 'undefined') {
+              try { localStorage.setItem(getUserStorageKey(), JSON.stringify(next)); } catch {}
+            }
+            return next;
+          });
         }
       })
       .on('broadcast', { event: 'chat_claimed' }, (payload: unknown) => {
@@ -568,6 +583,17 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setChatCount(0);
         setPageViews(0);
       })
+      .on('broadcast', { event: 'system_reset' }, () => {
+        console.log('[SYNC_DEBUG] WebSocket system_reset event received.');
+        knownSessionIds.current.clear();
+        setLiveVisitors([]);
+        setConversations([]);
+        setLiveCount(0);
+        setTodayCount(0);
+        setTotalUniqueCount(0);
+        setChatCount(0);
+        setPageViews(0);
+      })
       .subscribe();
 
     channelRef.current = channel;
@@ -587,6 +613,26 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     soundEnabledRef.current = next;
     setSoundEnabled(next);
   };
+
+  const deleteConversation = useCallback(async (convId: string) => {
+    if (!convId) return;
+    setConversations(prev => prev.filter(c => c.id !== convId));
+    setChatCount(prev => Math.max(0, prev - 1));
+    setReadConvMap(rMap => {
+      const next = { ...rMap };
+      delete next[convId];
+      if (typeof window !== 'undefined') {
+        try { localStorage.setItem(getUserStorageKey(), JSON.stringify(next)); } catch {}
+      }
+      return next;
+    });
+
+    try {
+      await fetch(`/api/chat/message?conversationId=${encodeURIComponent(convId)}`, {
+        method: 'DELETE'
+      });
+    } catch {}
+  }, []);
 
   const resetAll = async () => {
     knownSessionIds.current.clear();
@@ -627,9 +673,9 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
 
-  // MAIN FIX: Whenever liveCount goes UP, fire beep
+  // Global listener for new visitors to play chime
   useEffect(() => {
-    if (!initialLoadDone.current) return; // skip initial load
+    if (!initialLoadDone.current) return;
     if (liveCount > prevLiveCountRef.current) {
       // New visitor arrived! Beep.
       if (soundEnabledRef.current) {
@@ -654,11 +700,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         soundEnabled,
         unreadCount,
         unreadConversationsCount,
+        readConvMap,
         toggleSound,
         resetAll,
         refreshSync,
         resetUnreadCount,
         markConversationAsRead,
+        deleteConversation,
       }}
     >
       {children}

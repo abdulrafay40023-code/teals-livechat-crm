@@ -25,9 +25,10 @@ interface SavedConvSummary {
 const dedupeMessages = (incomingList: any[]) => {
   const map = new Map<string, any>();
   let seenGreet = false;
+  
   incomingList.forEach(m => {
     if (!m) return;
-    const isGreet = m.sender_type === 'ai' && (m.id === 'init-greet' || (typeof m.id === 'string' && m.id.startsWith('init-greet')) || m.content?.trim() === DEFAULT_GREETING.trim());
+    const isGreet = m.sender_type === 'ai' && (m.id === 'init-greet' || m.id?.startsWith?.('init-greet') || m.content?.trim() === DEFAULT_GREETING.trim());
     if (isGreet) {
       if (seenGreet) return;
       seenGreet = true;
@@ -36,7 +37,7 @@ const dedupeMessages = (incomingList: any[]) => {
         id: 'init-greet',
         seq: 1,
         status: 'read',
-        created_at: m.created_at
+        created_at: m.created_at || '1970-01-01T00:00:00.000Z'
       });
       return;
     }
@@ -50,39 +51,27 @@ const dedupeMessages = (incomingList: any[]) => {
       sender_name: 'Teals AI Agent',
       content: DEFAULT_GREETING,
       seq: 1,
-      status: 'read'
+      status: 'read',
+      created_at: '1970-01-01T00:00:00.000Z'
     });
   }
 
   const result = Array.from(map.values());
   return result.sort((a, b) => {
-    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
-    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+    const isAiGreetA = a.id === 'init-greet';
+    const isAiGreetB = b.id === 'init-greet';
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
-    const isTransferA = a.sender_type === 'system' && (a.content || '').includes('Transferring to a live support agent');
-    const isTransferB = b.sender_type === 'system' && (b.content || '').includes('Transferring to a live support agent');
-    const isClaimA = a.sender_type === 'system' && (a.content || '').includes('has claimed and joined');
-    const isClaimB = b.sender_type === 'system' && (b.content || '').includes('has claimed and joined');
-
-    if (isTransferA && isClaimB) return -1;
-    if (isClaimA && isTransferB) return 1;
-
-    if (isTransferA && b.sender_type === 'agent') return -1;
-    if (isTransferB && a.sender_type === 'agent') return 1;
-
-    if (isClaimA && b.sender_type === 'agent') return -1;
-    if (isClaimB && a.sender_type === 'agent') return 1;
+    const timeA = new Date(a.created_at || 0).getTime();
+    const timeB = new Date(b.created_at || 0).getTime();
+    if (timeA !== timeB) {
+      return timeA - timeB;
+    }
 
     const seqA = typeof a.seq === 'number' ? a.seq : 999999;
     const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    if (seqA !== seqB) {
-      return seqA - seqB;
-    }
-    const timeA = new Date(a.created_at || 0).getTime();
-    const timeB = new Date(b.created_at || 0).getTime();
-    return timeA - timeB;
+    return seqA - seqB;
   });
 };
 
@@ -111,7 +100,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       sender_name: 'Teals AI Agent',
       content: DEFAULT_GREETING,
       seq: 1,
-      status: 'read'
+      status: 'read',
+      created_at: '1970-01-01T00:00:00.000Z'
     }
   ]);
   const [inputText, setInputText] = useState('');
@@ -129,6 +119,30 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     if (!widgetChatContainerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = widgetChatContainerRef.current;
     isWidgetUserScrolledUp.current = scrollHeight - scrollTop - clientHeight > 80;
+  };
+
+  const fetchVisitorConversations = async (token: string, email?: string) => {
+    try {
+      const res = await fetch(`/api/chat/message?visitorToken=${encodeURIComponent(token)}${email ? `&email=${encodeURIComponent(email)}` : ''}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.conversations && Array.isArray(data.conversations) && data.conversations.length > 0) {
+          const mapped: SavedConvSummary[] = data.conversations.map((c: any) => {
+            const lastMsg = c.messages?.[c.messages.length - 1]?.content || DEFAULT_GREETING;
+            const timeStr = c.updated_at ? new Date(c.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now';
+            return {
+              id: c.id,
+              lastMessage: lastMsg,
+              updatedAt: timeStr
+            };
+          });
+          setSavedConversations(mapped);
+          try {
+            localStorage.setItem('teals_visitor_conv_list', JSON.stringify(mapped));
+          } catch {}
+        }
+      }
+    } catch {}
   };
 
   // Load saved lead details and previous conversation IDs on mount
@@ -153,7 +167,6 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   }, []);
 
   // Auto-save current conversation to the list whenever messages update
-  // so it appears in the inbox next time widget opens
   useEffect(() => {
     if (!conversationId || messages.length <= 1) return;
     const lastMsg = messages[messages.length - 1]?.content || 'Conversation';
@@ -207,17 +220,6 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     const targetConvId = activeConvId || token;
     setConversationId(targetConvId);
 
-    // 0ms INSTANT LOCAL CACHE RESTORE (never blank on refresh)
-    try {
-      const localCached = localStorage.getItem('teals_conv_cache_' + targetConvId);
-      if (localCached) {
-        const parsed = JSON.parse(localCached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(dedupeMessages(parsed));
-        }
-      }
-    } catch {}
-
     // Track visitor session (fire and forget)
     fetch('/api/visitor/track', {
       method: 'POST',
@@ -249,13 +251,16 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           } else {
             // Conversation does not exist on server (was reset or deleted)
             try {
-              localStorage.removeItem('teals_conv_cache_' + targetConvId);
-              localStorage.removeItem('teals_active_conv_id');
-              localStorage.removeItem('teals_visitor_conv_list');
+              Object.keys(localStorage).forEach(k => {
+                if (k.startsWith('teals_')) localStorage.removeItem(k);
+              });
             } catch {}
             setSavedConversations([]);
+            setHasSubmittedLead(false);
+            setConversationId(null);
             setIsHumanConnected(false);
             setAgentName(null);
+            setViewingHistory(false);
             setMessages([
               {
                 id: 'init-greet',
@@ -263,7 +268,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                 sender_name: 'Teals AI Agent',
                 content: DEFAULT_GREETING,
                 seq: 1,
-                status: 'read'
+                status: 'read',
+                created_at: '1970-01-01T00:00:00.000Z'
               }
             ]);
           }
@@ -272,7 +278,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     };
 
     restoreChatHistory();
-  }, [visitorTokenProp, sessionIdProp, propertySlug, pageUrl, referrerUrl, userName, userEmail]);
+  }, [visitorTokenProp, sessionIdProp, propertySlug, pageUrl, referrerUrl]);
 
   // Auto-expire agent typing after 3.5s so it never gets stuck
   useEffect(() => {
@@ -293,7 +299,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         if (res.ok) {
           const data = await res.json();
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
-            setMessages(dedupeMessages(data.conversation.messages));
+            setMessages(prev => dedupeMessages([...prev, ...data.conversation.messages]));
           }
           if (data.conversation?.mode === 'human' && data.conversation.assigned_agent_name) {
             setIsHumanConnected(true);
@@ -337,7 +343,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           sender_name: 'Teals AI Agent',
           content: DEFAULT_GREETING,
           seq: 1,
-          status: 'read'
+          status: 'read',
+          created_at: '1970-01-01T00:00:00.000Z'
         }
       ]);
     };
@@ -402,7 +409,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           setAgentTypingText(null);
 
           if (conv?.messages && Array.isArray(conv.messages)) {
-            setMessages(dedupeMessages(conv.messages));
+            setMessages(prev => dedupeMessages([...prev, ...conv.messages!]));
           }
         }
       })
@@ -434,9 +441,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           }
 
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
-            setMessages(dedupeMessages(data.conversation.messages));
+            setMessages(prev => dedupeMessages([...prev, ...data.conversation.messages]));
           } else if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-            setMessages(dedupeMessages(data.messages));
+            setMessages(prev => dedupeMessages([...prev, ...data.messages]));
           }
           if (data.conversation) {
             if (data.conversation.mode === 'human' && data.conversation.assigned_agent_name) {
@@ -514,12 +521,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     }, 2000);
   };
 
-  const handleLeadSubmit = async (e: React.FormEvent) => {
+  const handleLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!userName.trim() || !userEmail.trim()) return;
+    const formData = new FormData(e.currentTarget);
+    const cleanName = (formData.get('name') as string || userName || '').trim();
+    const cleanEmail = (formData.get('email') as string || userEmail || '').trim();
+    if (!cleanName || !cleanEmail) return;
 
-    const cleanName = userName.trim();
-    const cleanEmail = userEmail.trim();
+    setUserName(cleanName);
+    setUserEmail(cleanEmail);
 
     try {
       localStorage.setItem('teals_lead_name', cleanName);
@@ -527,8 +537,14 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       localStorage.setItem('teals_lead_submitted', 'true');
     } catch {}
 
+    const targetConvId = conversationId || ('conv_' + Math.random().toString(36).substring(2, 9));
+    setConversationId(targetConvId);
+    try {
+      localStorage.setItem('teals_active_conv_id', targetConvId);
+    } catch {}
+
     const initialConv = {
-      id: conversationId || ('conv_' + Math.random().toString(36).substring(2, 9)),
+      id: targetConvId,
       lastMessage: DEFAULT_GREETING,
       updatedAt: 'Just now'
     };
@@ -542,13 +558,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     setHasSubmittedLead(true);
     setViewingHistory(true);
 
+    fetchVisitorConversations(targetConvId, cleanEmail);
+
     try {
       await fetch('/api/visitor/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sessionId: sessionIdProp || visitorToken,
-          visitorToken: conversationId || visitorToken,
+          visitorToken: targetConvId,
           propertySlug,
           currentPage: pageUrl || '/',
           referrer: referrerUrl || 'Direct',
@@ -606,6 +624,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       localStorage.setItem('teals_active_conv_id', newConvId);
     } catch {}
 
+    const newConvSummary: SavedConvSummary = {
+      id: newConvId,
+      lastMessage: DEFAULT_GREETING,
+      updatedAt: 'Just now'
+    };
+    setSavedConversations(prev => [newConvSummary, ...prev.filter(c => c.id !== newConvId)]);
+
     setIsHumanConnected(false);
     setAgentName(null);
     setViewingHistory(false);
@@ -617,7 +642,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         content: DEFAULT_GREETING,
         seq: 1,
         status: 'read',
-        created_at: '2020-01-01T00:00:00.000Z'
+        created_at: '1970-01-01T00:00:00.000Z'
       }
     ]);
   };
@@ -746,8 +771,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           } catch {}
         }
 
-        if (data.conversation?.messages) {
-          setMessages(dedupeMessages(data.conversation.messages));
+        const serverMsgs = data.conversation?.messages || (data.aiMessage ? [data.message, data.aiMessage] : [data.message]);
+        if (serverMsgs && Array.isArray(serverMsgs)) {
+          setMessages(prev => dedupeMessages([...prev, ...serverMsgs]));
         }
       }
     } catch (err) {
@@ -906,6 +932,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       placeholder="e.g. Alex Johnson"
                       value={userName}
                       onChange={(e) => setUserName(e.target.value)}
+                      onInput={(e) => setUserName((e.target as HTMLInputElement).value)}
                       className="w-full bg-[#131b2e] border border-gray-700 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all"
                     />
                   </div>
@@ -924,6 +951,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       placeholder="e.g. alex@company.com"
                       value={userEmail}
                       onChange={(e) => setUserEmail(e.target.value)}
+                      onInput={(e) => setUserEmail((e.target as HTMLInputElement).value)}
                       className="w-full bg-[#131b2e] border border-gray-700 rounded-xl pl-9 pr-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-all"
                     />
                   </div>

@@ -17,9 +17,19 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const conversationId = searchParams.get('conversationId');
+  const visitorToken = searchParams.get('visitorToken');
+  const email = searchParams.get('email');
+
+  if (visitorToken || email) {
+    const list = await granularStore.getConversationsByVisitor(visitorToken || '', email || undefined);
+    return NextResponse.json({
+      conversations: list,
+      count: list.length
+    });
+  }
 
   if (!conversationId) {
-    return NextResponse.json({ error: 'Missing conversationId' }, { status: 400 });
+    return NextResponse.json({ error: 'Missing conversationId or visitorToken' }, { status: 400 });
   }
 
   const conv = await granularStore.getConversation(conversationId);
@@ -83,7 +93,7 @@ export async function POST(req: NextRequest) {
             content: "Hey! How can I help you with Teals CRM today?",
             is_whisper: false,
             seq: 1,
-            created_at: now
+            created_at: '1970-01-01T00:00:00.000Z'
           }
         ]
       };
@@ -282,6 +292,25 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     console.error('[CHAT_DEBUG] Error in /api/chat/message:', err);
+    const message = err instanceof Error ? err.message : 'Server error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const conversationId = searchParams.get('conversationId');
+    if (!conversationId) {
+      return NextResponse.json({ error: 'Missing conversationId' }, { status: 400 });
+    }
+
+    await granularStore.deleteConversation(conversationId);
+    await broadcastRealtimeEvent('chat_deleted', { conversationId });
+
+    return NextResponse.json({ success: true, conversationId });
+  } catch (err: unknown) {
+    console.error('[CHAT_DEBUG] Error in DELETE /api/chat/message:', err);
     const message = err instanceof Error ? err.message : 'Server error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
