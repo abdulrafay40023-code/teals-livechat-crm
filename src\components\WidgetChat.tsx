@@ -43,6 +43,17 @@ const dedupeMessages = (incomingList: any[]) => {
     map.set(m.id, m);
   });
 
+  if (!seenGreet) {
+    map.set('init-greet', {
+      id: 'init-greet',
+      sender_type: 'ai',
+      sender_name: 'Teals AI Agent',
+      content: DEFAULT_GREETING,
+      seq: 1,
+      status: 'read'
+    });
+  }
+
   const result = Array.from(map.values());
   return result.sort((a, b) => {
     const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
@@ -417,21 +428,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           const data = await res.json();
           // If conversation was wiped / does not exist on backend (e.g. after reset):
           if (!data.conversation && (!data.messages || data.messages.length === 0)) {
-            try {
-              localStorage.removeItem('teals_active_conv_id');
-              localStorage.removeItem('teals_visitor_conv_list');
-            } catch {}
-            setConversationId(null);
             setSavedConversations([]);
-            setMessages([
-              {
-                id: 'init-greet',
-                sender_type: 'ai',
-                sender_name: 'Teals AI Agent',
-                content: DEFAULT_GREETING,
-                created_at: new Date().toISOString()
-              }
-            ]);
+            setMessages(dedupeMessages([]));
             return;
           }
 
@@ -767,7 +765,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           <div onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(true);
+            setViewingHistory(false);
           }} className="flex items-center space-x-2">
             <span className="text-xs font-semibold text-gray-800">{DEFAULT_GREETING}</span>
           </div>
