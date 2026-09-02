@@ -737,13 +737,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         <div className="w-[350px] sm:w-[380px] h-[520px] bg-[#0d1322] border border-gray-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
           {/* Header */}
           <div className="p-3 px-4 bg-gradient-to-r from-blue-900/40 via-[#11192e] to-[#11192e] border-b border-gray-800 flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              {viewingHistory ? (
+            <div className="flex items-center space-x-2.5">
+              {hasSubmittedLead && !viewingHistory ? (
                 <button
-                  onClick={() => setViewingHistory(false)}
-                  className="p-1 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs"
+                  onClick={() => setViewingHistory(true)}
+                  className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                   <span>Back</span>
                 </button>
               ) : (
@@ -755,8 +755,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               )}
               <div>
                 <h3 className="text-xs font-bold text-white">
-                  {viewingHistory
-                    ? 'Conversation History'
+                  {!hasSubmittedLead
+                    ? 'Welcome to Live Support'
+                    : viewingHistory
+                    ? 'Conversations'
                     : isHumanConnected
                     ? (agentName || 'Support Agent')
                     : 'Teals AI Agent'}
@@ -764,8 +766,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                 <div className="flex items-center space-x-1.5 text-[10px] text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   <span>
-                    {viewingHistory
-                      ? 'Previous Chats Saved'
+                    {!hasSubmittedLead
+                      ? 'Please enter your details'
+                      : viewingHistory
+                      ? 'Select a chat or start new'
                       : isHumanConnected
                       ? 'Live Support Connected'
                       : 'Online & Ready to Help'}
@@ -806,70 +810,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             </div>
           </div>
 
-          {/* Conversations Inbox View */}
-          {viewingHistory ? (
-            <div className="flex-1 bg-[#0a0f1c] text-white overflow-y-auto flex flex-col">
-              {/* Start new chat card */}
-              <div className="p-4 border-b border-gray-800 bg-[#11192e]">
-                <button
-                  onClick={handleStartNewChat}
-                  className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg flex items-center justify-between group"
-                >
-                  <div className="flex items-center space-x-2.5">
-                    <PlusCircle className="w-4 h-4 text-white group-hover:rotate-90 transition-transform" />
-                    <span>Start a New Conversation</span>
-                  </div>
-                  <ArrowRight className="w-4 h-4 text-white/80 group-hover:translate-x-1 transition-transform" />
-                </button>
-              </div>
-
-              {/* Conversations List */}
-              <div className="flex-1 p-3 space-y-2 overflow-y-auto">
-                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1">Your Conversations</h4>
-                {savedConversations.map((c, idx) => {
-                  const isCurrent = c.id === conversationId;
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => isCurrent ? setViewingHistory(false) : handleSelectOldChat(c.id)}
-                      className={`flex items-center space-x-3 p-3 rounded-xl cursor-pointer transition-all border ${
-                        isCurrent 
-                          ? 'bg-blue-950/40 border-blue-600/50 shadow-sm' 
-                          : 'bg-[#131b2e] border-gray-800 hover:border-gray-700 hover:bg-[#18233c]'
-                      }`}
-                    >
-                      {/* Avatar */}
-                      <div className="flex-shrink-0 relative">
-                        <AgentAvatar type="ai" name="" size="md" />
-                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-brand-emerald rounded-full border border-[#131b2e]" />
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white">
-                            {isCurrent ? 'Current Active Chat' : `Support Chat #${savedConversations.length - idx}`}
-                          </span>
-                          <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{c.updatedAt}</span>
-                        </div>
-                        <div className="flex items-center space-x-1 mt-0.5">
-                          {isCurrent && <MessageSquare className="w-3 h-3 text-blue-400 flex-shrink-0" />}
-                          <p className="text-[11px] text-gray-300 truncate">{c.lastMessage || 'Conversation'}</p>
-                        </div>
-                      </div>
-
-                      {/* Arrow */}
-                      <ArrowRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
-                    </div>
-                  );
-                })}
-
-                {savedConversations.length === 0 && (
-                  <div className="text-center py-10 text-gray-500 text-xs">No previous conversations yet</div>
-                )}
-              </div>
-            </div>
-          ) : !hasSubmittedLead ? (
+          {/* View Routing: 1. Lead Form FIRST, 2. Conversations Inbox, 3. Active Chat */}
+          {!hasSubmittedLead ? (
             /* Lead Form */
             <div className="flex-1 p-6 flex flex-col justify-center bg-[#0a0f1c] text-white">
               <div className="text-center mb-5">
@@ -925,6 +867,71 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
+            </div>
+          ) : viewingHistory ? (
+            /* Conversations Inbox View (Instagram style with chat list & new chat button at the bottom) */
+            <div className="flex-1 bg-[#0a0f1c] text-white flex flex-col justify-between overflow-hidden">
+              {/* Conversations List */}
+              <div className="flex-1 p-3 space-y-2 overflow-y-auto">
+                <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 mb-2">Your Conversations</h4>
+                {(savedConversations.length > 0 ? savedConversations : [
+                  {
+                    id: conversationId || 'conv_default',
+                    lastMessage: DEFAULT_GREETING,
+                    updatedAt: 'Just now'
+                  }
+                ]).map((c, idx) => {
+                  const isCurrent = c.id === conversationId;
+                  return (
+                    <div
+                      key={c.id}
+                      onClick={() => isCurrent ? setViewingHistory(false) : handleSelectOldChat(c.id)}
+                      className={`flex items-center space-x-3 p-3 rounded-xl cursor-pointer transition-all border ${
+                        isCurrent 
+                          ? 'bg-blue-950/40 border-blue-600/50 shadow-sm' 
+                          : 'bg-[#131b2e] border-gray-800 hover:border-gray-700 hover:bg-[#18233c]'
+                      }`}
+                    >
+                      {/* Avatar */}
+                      <div className="flex-shrink-0 relative">
+                        <AgentAvatar type="ai" name="" size="md" />
+                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-brand-emerald rounded-full border border-[#131b2e]" />
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white">
+                            {isCurrent ? 'Teals AI Auto-Support' : `Support Chat #${(savedConversations.length || 1) - idx}`}
+                          </span>
+                          <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{c.updatedAt || 'Just now'}</span>
+                        </div>
+                        <div className="flex items-center space-x-1 mt-0.5">
+                          {isCurrent && <MessageSquare className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+                          <p className="text-[11px] text-gray-300 truncate">{c.lastMessage || DEFAULT_GREETING}</p>
+                        </div>
+                      </div>
+
+                      {/* Arrow */}
+                      <ArrowRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Start new chat card at the BOTTOM */}
+              <div className="p-3 border-t border-gray-800 bg-[#11192e]">
+                <button
+                  onClick={handleStartNewChat}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg flex items-center justify-between group"
+                >
+                  <div className="flex items-center space-x-2">
+                    <PlusCircle className="w-4 h-4 text-white group-hover:rotate-90 transition-transform" />
+                    <span>Start a New Conversation</span>
+                  </div>
+                  <ArrowRight className="w-4 h-4 text-white/80 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </div>
             </div>
           ) : (
             <>
