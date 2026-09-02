@@ -137,6 +137,7 @@ class GranularStore {
   private todayIps = new Map<string, Set<string>>();
   private allTimeIps = new Set<string>();
   private totalViews = 0;
+  private lastActiveSyncTime = 0;
 
   constructor() {
     const admin: StoreAgent = {
@@ -166,6 +167,8 @@ class GranularStore {
   }
 
   async getSession(sessionId: string): Promise<StoreVisitorSession | null> {
+    const cached = this.sessionCache.get(sessionId);
+    if (cached) return cached;
     try {
       const key = `sessions/${sanitizeKey(sessionId)}.json`;
       const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(key);
@@ -179,16 +182,10 @@ class GranularStore {
     return null;
   }
 
-  async saveSession(session: StoreVisitorSession): Promise<void> {
+  async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
     this.sessionCache.set(session.id, session);
+    this.lastActiveSyncTime = 0;
     
-    const today = getTodayKey();
-    if (!this.todayIps.has(today)) {
-      this.todayIps.set(today, new Set());
-    }
-    this.todayIps.get(today)!.add(session.ip_address);
-    this.allTimeIps.add(session.ip_address);
-
     try {
       const key = `sessions/${sanitizeKey(session.id)}.json`;
       await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
@@ -198,10 +195,12 @@ class GranularStore {
     } catch (e) {
       console.error('Error saving session:', e);
     }
+    return session;
   }
 
   async removeSession(sessionId: string): Promise<void> {
     this.sessionCache.delete(sessionId);
+    this.lastActiveSyncTime = 0;
     try {
       const key = `sessions/${sanitizeKey(sessionId)}.json`;
       await supabaseAdmin.storage.from(BUCKET).remove([key]);
@@ -210,58 +209,27 @@ class GranularStore {
 
   async getConversation(convId: string): Promise<StoreConversation | null> {
     const cached = this.convCache.get(convId);
+    if (cached && cached.messages && cached.messages.length > 0) {
+      return cached;
+    }
     try {
       const key = `conversations/${sanitizeKey(convId)}.json`;
       const { data, error } = await supabaseAdmin.storage.from(BUCKET).download(key);
       if (!error && data) {
         const cloudConv: StoreConversation = JSON.parse(await data.text());
-        if (cached) {
-          const msgMap = new Map<string, StoreMessage>();
-          (cloudConv.messages || []).forEach(m => msgMap.set(m.id, m));
-          (cached.messages || []).forEach(m => msgMap.set(m.id, m));
-
-          const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
-
-          const isClaimed = !!(cached.assigned_agent_id || cloudConv.assigned_agent_id || cached.assigned_agent_name || cloudConv.assigned_agent_name);
-          const merged: StoreConversation = {
-            ...cloudConv,
-            ...cached,
-            mode: isClaimed || cached.mode === 'human' || cloudConv.mode === 'human' ? 'human' : 'ai',
-            status: isClaimed ? 'active' : (cached.status === 'pending_agent' || cloudConv.status === 'pending_agent' ? 'pending_agent' : 'active'),
-            assigned_agent_id: cached.assigned_agent_id || cloudConv.assigned_agent_id,
-            assigned_agent_name: cached.assigned_agent_name || cloudConv.assigned_agent_name,
-            assigned_agent_email: cached.assigned_agent_email || cloudConv.assigned_agent_email,
-            messages: mergedMessages
-          };
-          this.convCache.set(convId, merged);
-          return merged;
-        }
         this.convCache.set(convId, cloudConv);
         return cloudConv;
       }
     } catch {}
-    // If download failed or file doesn't exist yet, return cached in-memory instance
     if (cached) return cached;
     return null;
   }
 
   async saveConversation(conv: StoreConversation): Promise<StoreConversation> {
     const key = `conversations/${sanitizeKey(conv.id)}.json`;
-    let cloudConv: StoreConversation | null = null;
-
-    try {
-      const { data } = await supabaseAdmin.storage.from(BUCKET).download(key);
-      if (data) {
-        cloudConv = JSON.parse(await data.text());
-      }
-    } catch {}
-
     const cached = this.convCache.get(conv.id);
-    const msgMap = new Map<string, StoreMessage>();
 
-    if (cloudConv?.messages) {
-      cloudConv.messages.forEach(m => msgMap.set(m.id, m));
-    }
+    const msgMap = new Map<string, StoreMessage>();
     if (cached?.messages) {
       cached.messages.forEach(m => msgMap.set(m.id, m));
     }
@@ -269,21 +237,21 @@ class GranularStore {
 
     const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
 
-    const isClaimed = !!(conv.assigned_agent_id || cached?.assigned_agent_id || cloudConv?.assigned_agent_id || conv.assigned_agent_name || cached?.assigned_agent_name || cloudConv?.assigned_agent_name);
+    const isClaimed = !!(conv.assigned_agent_id || cached?.assigned_agent_id || conv.assigned_agent_name || cached?.assigned_agent_name);
     const mergedConv: StoreConversation = {
-      ...(cloudConv || {}),
       ...(cached || {}),
       ...conv,
-      mode: isClaimed || conv.mode === 'human' || cached?.mode === 'human' || cloudConv?.mode === 'human' ? 'human' : 'ai',
-      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cached?.status === 'pending_agent' || cloudConv?.status === 'pending_agent' ? 'pending_agent' : 'active'),
-      assigned_agent_id: conv.assigned_agent_id || cached?.assigned_agent_id || cloudConv?.assigned_agent_id,
-      assigned_agent_name: conv.assigned_agent_name || cached?.assigned_agent_name || cloudConv?.assigned_agent_name,
-      assigned_agent_email: conv.assigned_agent_email || cached?.assigned_agent_email || cloudConv?.assigned_agent_email,
+      mode: isClaimed || conv.mode === 'human' || cached?.mode === 'human' ? 'human' : 'ai',
+      status: isClaimed ? 'active' : (conv.status === 'pending_agent' || cached?.status === 'pending_agent' ? 'pending_agent' : 'active'),
+      assigned_agent_id: conv.assigned_agent_id || cached?.assigned_agent_id,
+      assigned_agent_name: conv.assigned_agent_name || cached?.assigned_agent_name,
+      assigned_agent_email: conv.assigned_agent_email || cached?.assigned_agent_email,
       messages: mergedMessages,
       updated_at: new Date().toISOString()
     };
 
     this.convCache.set(conv.id, mergedConv);
+    this.lastActiveSyncTime = 0;
 
     try {
       await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
@@ -308,8 +276,10 @@ class GranularStore {
     const HEARTBEAT_TIMEOUT = 25 * 1000;
 
     try {
-      // 1. Sync Sessions with Storage
-      const validSessionIds = new Set<string>();
+      if (now - this.lastActiveSyncTime > 2500) {
+        this.lastActiveSyncTime = now;
+        // 1. Sync Sessions with Storage
+        const validSessionIds = new Set<string>();
       const { data: sFiles } = await supabaseAdmin.storage.from(BUCKET).list('sessions', { limit: 100 });
       if (sFiles && sFiles.length > 0) {
         await Promise.all(sFiles.map(async (f) => {
@@ -373,12 +343,13 @@ class GranularStore {
           } catch {}
         }));
       }
-      // Purge conversations from memory that are no longer in storage
-      Array.from(this.convCache.keys()).forEach((id) => {
-        if (!validConvIds.has(id)) {
-          this.convCache.delete(id);
-        }
-      });
+        // Purge conversations from memory that are no longer in storage
+        Array.from(this.convCache.keys()).forEach((id) => {
+          if (!validConvIds.has(id)) {
+            this.convCache.delete(id);
+          }
+        });
+      }
     } catch (e) {
       console.error('Sync error:', e);
     }

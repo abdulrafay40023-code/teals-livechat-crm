@@ -150,7 +150,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     setSavedConversations(prev => {
       const filtered = prev.filter(c => c.id !== conversationId);
       const updated = [{ id: conversationId, lastMessage: lastMsg, updatedAt: timeStr }, ...filtered];
-      try { localStorage.setItem('teals_visitor_conv_list', JSON.stringify(updated)); } catch {}
+      try { 
+        localStorage.setItem('teals_visitor_conv_list', JSON.stringify(updated));
+        localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
+      } catch {}
       return updated;
     });
   }, [conversationId, messages]);
@@ -192,6 +195,17 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
     const targetConvId = activeConvId || token;
     setConversationId(targetConvId);
+
+    // 0ms INSTANT LOCAL CACHE RESTORE (never blank on refresh)
+    try {
+      const localCached = localStorage.getItem('teals_conv_cache_' + targetConvId);
+      if (localCached) {
+        const parsed = JSON.parse(localCached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(dedupeMessages(parsed));
+        }
+      }
+    } catch {}
 
     // Track visitor session (fire and forget)
     fetch('/api/visitor/track', {

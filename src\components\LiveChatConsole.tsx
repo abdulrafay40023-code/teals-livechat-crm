@@ -277,6 +277,30 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     }
   }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at]);
 
+  // 0ms instant local cache restore on conversation change or page refresh (never blank)
+  useEffect(() => {
+    const targetId = selectedConv?.id;
+    if (!targetId) return;
+    try {
+      const cached = localStorage.getItem('teals_agent_cache_' + targetId);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(sortTimelineMessages(parsed));
+        }
+      }
+    } catch {}
+  }, [selectedConv?.id]);
+
+  // Persist messages to local cache for 0ms refresh
+  useEffect(() => {
+    const targetId = selectedConv?.id;
+    if (!targetId || messages.length === 0) return;
+    try {
+      localStorage.setItem('teals_agent_cache_' + targetId, JSON.stringify(messages));
+    } catch {}
+  }, [selectedConv?.id, messages]);
+
   useEffect(() => {
     // Only auto-scroll if user is near the bottom
     if (!isUserScrolledUp.current) {
