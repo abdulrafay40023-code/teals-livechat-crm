@@ -42,13 +42,28 @@ const dedupeMessages = (list: any[]) => {
     }
     map.set(m.id, m);
   });
-  return Array.from(map.values()).sort((a, b) => {
+
+  const sorted = Array.from(map.values()).sort((a, b) => {
     if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
       return a.seq - b.seq;
     }
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     return timeA - timeB;
+  });
+
+  let lastTime = 0;
+  return sorted.map((m, index) => {
+    let msgTime = new Date(m.created_at || Date.now()).getTime();
+    if (isNaN(msgTime) || msgTime <= 0) msgTime = Date.now();
+    if (index > 0 && msgTime < lastTime) {
+      msgTime = lastTime + 1000;
+    }
+    lastTime = msgTime;
+    return {
+      ...m,
+      created_at: new Date(msgTime).toISOString()
+    };
   });
 };
 
@@ -738,21 +753,20 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           {/* Header */}
           <div className="p-3 px-4 bg-gradient-to-r from-blue-900/40 via-[#11192e] to-[#11192e] border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
-              {hasSubmittedLead && !viewingHistory ? (
+              {hasSubmittedLead && !viewingHistory && (
                 <button
                   onClick={() => setViewingHistory(true)}
-                  className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700"
+                  className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700 flex-shrink-0"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                   <span>Back</span>
                 </button>
-              ) : (
-                <AgentAvatar
-                  type={isHumanConnected ? (agentName ? 'male' : 'female') : 'ai'}
-                  name={agentName || ''}
-                  size="md"
-                />
               )}
+              <AgentAvatar
+                type={isHumanConnected ? (agentName ? 'male' : 'female') : 'ai'}
+                name={agentName || ''}
+                size="md"
+              />
               <div>
                 <h3 className="text-xs font-bold text-white">
                   {!hasSubmittedLead
@@ -936,7 +950,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           ) : (
             <>
               {/* Chat Stream */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-[#0a0f1c]">
+              <div 
+                className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3 bg-[#0a0f1c] scroll-smooth overscroll-contain"
+                style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
+              >
                 {messages.map((m) => {
                   const isVisitor = m.sender_type === 'visitor';
                   const isSystem = m.sender_type === 'system';

@@ -369,17 +369,16 @@ class GranularStore {
     this.todayIps.set(today, currentTodaySet);
     this.allTimeIps = currentAllTimeSet;
 
-    const allConvs = Array.from(this.convCache.values()).filter(c => c.property_slug === propertySlug);
-    // Show conversations where visitor has sent at least one message, OR human agent is involved
+    const allConvs = Array.from(this.convCache.values()).filter(c => !c.property_slug || c.property_slug === propertySlug);
+    // Return all active and historic conversations so admin refresh never loses chats
     const activeConversations = allConvs.filter(c => {
-      const hasVisitorMessage = c.messages && c.messages.some(m => m.sender_type === 'visitor');
-      return hasVisitorMessage || c.mode === 'human' || c.status === 'pending_agent' || !!c.assigned_agent_id;
+      return (c.messages && c.messages.length > 0) || !!c.visitor_name || c.mode === 'human' || c.status === 'pending_agent' || !!c.assigned_agent_id;
     });
 
     return {
       liveVisitors,
-      todayVisitorsCount: currentTodaySet.size,
-      totalUniqueCount: currentAllTimeSet.size,
+      todayVisitorsCount: this.todayIps.get(today)?.size || 0,
+      totalUniqueCount: this.allTimeIps.size,
       conversations: activeConversations,
       pageViews: this.totalViews
     };
