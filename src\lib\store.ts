@@ -93,9 +93,9 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
 
   const list = Array.from(map.values());
 
-  return list.sort((a, b) => {
-    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
-    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+  const sorted = list.sort((a, b) => {
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && (a.seq === 1 || (a.content || '').includes('Hey! How can I help')));
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && (b.seq === 1 || (b.content || '').includes('Hey! How can I help')));
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
@@ -123,6 +123,11 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
     const timeB = new Date(b.created_at || 0).getTime();
     return timeA - timeB;
   });
+
+  return sorted.map((m, idx) => ({
+    ...m,
+    seq: idx + 1
+  }));
 };
 
 class GranularStore {
