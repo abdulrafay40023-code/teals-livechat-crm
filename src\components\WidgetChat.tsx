@@ -43,27 +43,15 @@ const dedupeMessages = (list: any[]) => {
     map.set(m.id, m);
   });
 
-  const sorted = Array.from(map.values()).sort((a, b) => {
-    if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-      return a.seq - b.seq;
+  return Array.from(map.values()).sort((a, b) => {
+    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
+    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
+    if (seqA !== seqB) {
+      return seqA - seqB;
     }
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     return timeA - timeB;
-  });
-
-  let lastTime = 0;
-  return sorted.map((m, index) => {
-    let msgTime = new Date(m.created_at || Date.now()).getTime();
-    if (isNaN(msgTime) || msgTime <= 0) msgTime = Date.now();
-    if (index > 0 && msgTime < lastTime) {
-      msgTime = lastTime + 1000;
-    }
-    lastTime = msgTime;
-    return {
-      ...m,
-      created_at: new Date(msgTime).toISOString()
-    };
   });
 };
 
@@ -314,28 +302,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           setLoading(false);
           setAgentTypingText(null);
 
-          const claimMsgId = 'msg_sys_claim_' + (cId || conversationId || 'main');
-          const nowIso = new Date(Date.now() + 50).toISOString();
-
-          setMessages((prev) => {
-            const maxSeq = prev.reduce((max, m) => Math.max(max, m.seq || 0), 0);
-            const sysMsg = {
-              id: claimMsgId,
-              sender_type: 'system' as const,
-              sender_name: 'System',
-              content: `Live Support Agent ${agentName || 'Agent'} has claimed and joined the conversation.`,
-              seq: maxSeq + 1,
-              created_at: nowIso
-            };
-            const nextList = prev.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined')));
-            if (conv?.messages && Array.isArray(conv.messages)) {
-              conv.messages
-                .filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined')))
-                .forEach(m => nextList.push({ ...m, sender_name: m.sender_name || 'Agent' }));
-            }
-            nextList.push(sysMsg);
-            return dedupeMessages(nextList);
-          });
+          if (conv?.messages && Array.isArray(conv.messages)) {
+            setMessages(dedupeMessages(conv.messages));
+          }
         }
       })
       .on('broadcast', { event: 'chat_read' }, (payload: unknown) => {

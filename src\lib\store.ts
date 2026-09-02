@@ -85,28 +85,15 @@ function getTodayKey(): string {
 }
 
 export const sortMessagesChronologically = <T extends { created_at?: string; seq?: number }>(messages: T[]): T[] => {
-  const sorted = [...messages].sort((a, b) => {
-    if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-      return a.seq - b.seq;
+  return [...messages].sort((a, b) => {
+    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
+    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
+    if (seqA !== seqB) {
+      return seqA - seqB;
     }
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     return timeA - timeB;
-  });
-
-  let lastTime = 0;
-  return sorted.map((m, idx) => {
-    let msgTime = new Date(m.created_at || Date.now()).getTime();
-    if (isNaN(msgTime) || msgTime <= 0) msgTime = Date.now();
-    if (idx > 0 && msgTime < lastTime) {
-      msgTime = lastTime + 1000;
-    }
-    lastTime = msgTime;
-    return {
-      ...m,
-      seq: idx + 1,
-      created_at: new Date(msgTime).toISOString()
-    };
   });
 };
 

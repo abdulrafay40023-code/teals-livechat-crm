@@ -114,6 +114,24 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const isNeedsClaim = !isClaimedByMe && !isClaimedByOther && (selectedConv?.mode === 'human' || selectedConv?.status === 'pending_agent');
   const isAiAutomated = !isClaimedByMe && !isClaimedByOther && selectedConv?.mode === 'ai' && selectedConv?.status !== 'pending_agent';
 
+const sortTimelineMessages = <T extends { id: string; seq?: number; created_at?: string }>(msgs: T[]): T[] => {
+  const map = new Map<string, T>();
+  msgs.forEach(m => {
+    if (!m || !m.id) return;
+    map.set(m.id, m);
+  });
+  return Array.from(map.values()).sort((a, b) => {
+    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
+    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
+    if (seqA !== seqB) {
+      return seqA - seqB;
+    }
+    const timeA = new Date(a.created_at || 0).getTime();
+    const timeB = new Date(b.created_at || 0).getTime();
+    return timeA - timeB;
+  });
+};
+
   // Real-Time Direct WebSocket Stream for Messages & Keystrokes
   useEffect(() => {
     const targetId = selectedConv?.id;
@@ -129,8 +147,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
       .on('broadcast', { event: 'chat_message' }, (payload: unknown) => {
         const raw = (payload as Record<string, unknown>)?.payload || payload;
         const cId = (raw as Record<string, unknown>)?.conversationId;
-        const message = (raw as Record<string, unknown>)?.message as { id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; created_at: string };
-        const systemMessage = (raw as Record<string, unknown>)?.systemMessage as { id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; created_at: string };
+        const message = (raw as Record<string, unknown>)?.message as { id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; created_at: string };
+        const systemMessage = (raw as Record<string, unknown>)?.systemMessage as { id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; created_at: string };
 
         if (cId === targetId) {
           // Immediately dismiss sneak-peek preview once message is posted
@@ -138,16 +156,21 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
             setLiveTypingPreview(null);
           }
 
-          const nowIso = new Date().toISOString();
           setMessages((prev) => {
-            const map = new Map<string, any>();
-            prev.forEach(m => map.set(m.id, { ...m, created_at: m.created_at || nowIso }));
-            if (message) map.set(message.id, { ...message, created_at: message.created_at || nowIso });
-            if (systemMessage) map.set(systemMessage.id, { ...systemMessage, created_at: systemMessage.created_at || nowIso });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
+            const nextList = [...prev];
+            if (message) nextList.push(message);
+            if (systemMessage) nextList.push(systemMessage);
+            return sortTimelineMessages(nextList);
           });
+        }
+      })
+      .on('broadcast', { event: 'chat_claimed' }, (payload: unknown) => {
+        const raw = (payload as Record<string, unknown>)?.payload || payload;
+        const cId = (raw as Record<string, unknown>)?.conversationId;
+        const conv = (raw as Record<string, unknown>)?.conversation as { messages?: Array<{ id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; created_at: string }> };
+
+        if (cId === targetId && conv?.messages && Array.isArray(conv.messages)) {
+          setMessages(sortTimelineMessages(conv.messages));
         }
       })
       .on('broadcast', { event: 'typing_event' }, (payload: unknown) => {
@@ -188,17 +211,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
           const data = await res.json();
           if (data.messages && Array.isArray(data.messages)) {
             setMessages((prev) => {
-              const map = new Map();
-              data.messages.forEach((m: { id: string }) => map.set(m.id, m));
-              prev.forEach(m => map.set(m.id, m));
-              return Array.from(map.values()).sort((a, b) => {
-                if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-                  return a.seq - b.seq;
-                }
-                const timeA = new Date(a.created_at || 0).getTime();
-                const timeB = new Date(b.created_at || 0).getTime();
-                return timeA - timeB;
-              });
+              const combined = [...data.messages, ...prev];
+              return sortTimelineMessages(combined);
             });
           }
         }
