@@ -262,14 +262,20 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       if (selectedConv.id) {
         onMarkRead?.(selectedConv.id);
       }
-      setMessages(sortTimelineMessages(selectedConv.messages));
+      setMessages((prev) => {
+        const serverMap = new Map();
+        selectedConv.messages!.forEach(m => serverMap.set(m.id, m));
+        // Keep any in-flight optimistic messages that haven't been saved on server yet
+        const inFlight = prev.filter(p => !serverMap.has(p.id) && ((p as any).conversation_id === selectedConv.id || !(p as any).conversation_id));
+        return sortTimelineMessages([...selectedConv.messages!, ...inFlight]);
+      });
 
       const last = selectedConv.messages[selectedConv.messages.length - 1];
       if (last && last.sender_type === 'visitor') {
         setLiveTypingPreview(null);
       }
     }
-  }, [selectedConv?.id]);
+  }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at]);
 
   useEffect(() => {
     // Only auto-scroll if user is near the bottom
@@ -313,7 +319,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         setClaimError(data.error || 'Failed to claim chat.');
       } else {
         if (data.conversation?.messages) {
-          setMessages(data.conversation.messages);
+          setMessages(sortTimelineMessages(data.conversation.messages));
         }
         onClaimSuccess();
       }
@@ -385,7 +391,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       assigned_agent_id: agentId,
       assigned_agent_name: agentName,
       assigned_agent_email: agentEmail,
-      messages: [...messages.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))), sysMsg]
+      messages: sortTimelineMessages([...messages.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))), sysMsg])
     };
 
     // Immediate WebSocket broadcast to Visitor Widget and all Dashboards (sub-5ms)
@@ -400,19 +406,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       }
     });
 
-    setMessages((prev) => {
-      const map = new Map<string, any>();
-      prev.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))).forEach(m => map.set(m.id, { ...m, created_at: m.created_at || nowIso }));
-      map.set(sysMsg.id, sysMsg);
-      return Array.from(map.values()).sort((a, b) => {
-        if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-          return a.seq - b.seq;
-        }
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeA - timeB;
-      });
-    });
+    setMessages((prev) => sortTimelineMessages([...prev.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))), sysMsg]));
 
     try {
       const res = await fetch('/api/agent/claim-chat', {
@@ -432,19 +426,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         setClaimError(data.error || 'Failed to claim chat.');
       } else {
         if (data.conversation?.messages) {
-          setMessages((prev) => {
-            const map = new Map<string, any>();
-            prev.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))).forEach(m => map.set(m.id, { ...m, created_at: m.created_at || nowIso }));
-            data.conversation.messages.forEach((m: any) => map.set(m.id, { ...m, created_at: m.created_at || nowIso }));
-            return Array.from(map.values()).sort((a, b) => {
-              if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-                return a.seq - b.seq;
-              }
-              const timeA = new Date(a.created_at || 0).getTime();
-              const timeB = new Date(b.created_at || 0).getTime();
-              return timeA - timeB;
-            });
-          });
+          setMessages(sortTimelineMessages(data.conversation.messages));
         }
         onClaimSuccess();
       }
@@ -496,19 +478,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       created_at: new Date().toISOString()
     };
 
-    setMessages((prev) => {
-      const map = new Map();
-      prev.forEach(m => map.set(m.id, m));
-      map.set(optimisticMsg.id, optimisticMsg);
-      return Array.from(map.values()).sort((a, b) => {
-        if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-          return a.seq - b.seq;
-        }
-        const timeA = new Date(a.created_at || 0).getTime();
-        const timeB = new Date(b.created_at || 0).getTime();
-        return timeA - timeB;
-      });
-    });
+    setMessages((prev) => sortTimelineMessages([...prev, optimisticMsg]));
 
     try {
       const res = await fetch('/api/chat/message', {
@@ -527,19 +497,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       if (res.ok) {
         const data = await res.json();
         if (data.message) {
-          setMessages((prev) => {
-            const map = new Map();
-            prev.forEach(m => map.set(m.id, m));
-            map.set(data.message.id, data.message);
-            return Array.from(map.values()).sort((a, b) => {
-              if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
-                return a.seq - b.seq;
-              }
-              const timeA = new Date(a.created_at || 0).getTime();
-              const timeB = new Date(b.created_at || 0).getTime();
-              return timeA - timeB;
-            });
-          });
+          setMessages((prev) => sortTimelineMessages([...prev.filter(m => m.id !== clientMsgId), data.message]));
         }
       }
     } catch (err) {
