@@ -264,7 +264,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         if (res.ok) {
           const data = await res.json();
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
-            setMessages(prev => dedupeMessages([...prev, ...data.conversation.messages]));
+            setMessages(dedupeMessages(data.conversation.messages));
           }
           if (data.conversation?.mode === 'human' && data.conversation.assigned_agent_name) {
             setIsHumanConnected(true);
@@ -284,6 +284,34 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       config: { broadcast: { self: true } }
     });
     channelRef.current = channel;
+
+    const handleFullWipe = () => {
+      try {
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith('teals_')) {
+            localStorage.removeItem(k);
+          }
+        });
+      } catch {}
+      setConversationId(null);
+      setSavedConversations([]);
+      setHasSubmittedLead(false);
+      setUserName('');
+      setUserEmail('');
+      setIsHumanConnected(false);
+      setAgentName(null);
+      setViewingHistory(false);
+      setMessages([
+        {
+          id: 'init-greet',
+          sender_type: 'ai',
+          sender_name: 'Teals AI Agent',
+          content: DEFAULT_GREETING,
+          seq: 1,
+          status: 'read'
+        }
+      ]);
+    };
 
     channel
       .on('broadcast', { event: 'chat_message' }, (payload: unknown) => {
@@ -359,33 +387,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           setMessages(prev => prev.map(m => m.sender_type === 'visitor' ? { ...m, status: 'read' as const } : m));
         }
       })
-      .on('broadcast', { event: 'stats_reset' }, () => {
-        try {
-          localStorage.removeItem('teals_lead_submitted');
-          localStorage.removeItem('teals_active_conv_id');
-          localStorage.removeItem('teals_visitor_conv_list');
-          localStorage.removeItem('teals_lead_name');
-          localStorage.removeItem('teals_lead_email');
-        } catch {}
-        setConversationId(null);
-        setSavedConversations([]);
-        setHasSubmittedLead(false);
-        setUserName('');
-        setUserEmail('');
-        setIsHumanConnected(false);
-        setAgentName(null);
-        setViewingHistory(false);
-        setMessages([
-          {
-            id: 'init-greet',
-            sender_type: 'ai',
-            sender_name: 'Teals AI Agent',
-            content: DEFAULT_GREETING,
-            seq: 1,
-            status: 'read'
-          }
-        ]);
-      })
+      .on('broadcast', { event: 'stats_reset' }, handleFullWipe)
+      .on('broadcast', { event: 'system_reset' }, handleFullWipe)
       .subscribe();
 
     const fetchFullHistory = async () => {
@@ -737,10 +740,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         }
 
         if (data.conversation?.messages) {
-          setMessages((prev) => {
-            const merged = [...prev, ...data.conversation.messages];
-            return dedupeMessages(merged);
-          });
+          setMessages(dedupeMessages(data.conversation.messages));
         }
       }
     } catch (err) {

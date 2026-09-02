@@ -10,8 +10,11 @@ export async function POST() {
     // 2. Clear all active conversations and cloud storage
     await granularStore.clearAllConversations();
 
-    // 3. Broadcast stats reset to all dashboards
-    await broadcastRealtimeEvent('stats_reset', {});
+    // 3. Broadcast stats reset & complete system wipe to all client browsers
+    await Promise.all([
+      broadcastRealtimeEvent('stats_reset', {}),
+      broadcastRealtimeEvent('system_reset', {})
+    ]);
 
     return NextResponse.json({
       success: true,
