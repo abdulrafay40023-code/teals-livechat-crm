@@ -470,6 +470,31 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }
         }
       })
+      .on('broadcast', { event: 'new_conversation' }, (payload: unknown) => {
+        const raw = (payload as Record<string, unknown>)?.payload || payload;
+        const conversation = (raw as Record<string, unknown>)?.conversation as LiveConversation;
+        if (conversation && conversation.id) {
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === conversation.id);
+            if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = { ...prev[idx], ...conversation };
+              return updated;
+            }
+            return [conversation, ...prev];
+          });
+          setReadConvMap(rMap => {
+            if (!rMap[conversation.id]) return rMap;
+            const next = { ...rMap };
+            delete next[conversation.id];
+            try { localStorage.setItem('teals_read_conv_map', JSON.stringify(next)); } catch {}
+            return next;
+          });
+        }
+        if (soundEnabledRef.current) {
+          playVisitorAlertSound();
+        }
+      })
       .on('broadcast', { event: 'chat_claimed' }, (payload: unknown) => {
         console.log('[SYNC_DEBUG] WebSocket chat_claimed event received:', payload);
         const raw = (payload as Record<string, unknown>)?.payload || payload;

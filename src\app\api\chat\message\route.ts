@@ -92,6 +92,8 @@ export async function POST(req: NextRequest) {
       if (senderEmail) conv.visitor_email = senderEmail;
     }
 
+    const isFirstVisitorMsg = senderType === 'visitor' && (!conv.messages || conv.messages.filter(m => m.sender_type === 'visitor').length === 0);
+
     const maxSeq = (conv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
     const newMsg: StoreMessage = {
       id: clientMsgId || ('msg_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36)),
@@ -133,9 +135,10 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString()
       };
       
-      if (!conv.messages) conv.messages = [];
       conv.messages = conv.messages.filter(m => !(m.sender_type === 'system' && m.content.includes('Transferring to a live support agent')));
       conv.messages.push(handoffSystemMsg);
+
+      await granularStore.saveConversation(conv);
 
       await Promise.all([
         broadcastRealtimeEvent('chat_message', {
@@ -145,7 +148,10 @@ export async function POST(req: NextRequest) {
           conversation: conv,
           isHandoffRequested: true
         }),
-        granularStore.saveConversation(conv)
+        broadcastRealtimeEvent('new_conversation', {
+          conversationId: conv.id,
+          conversation: conv
+        })
       ]);
 
       return NextResponse.json({
@@ -156,11 +162,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // CASE 2: AI Mode with Visitor message (Single Atomic Save)
+    // CASE 2: AI Mode with Visitor message (Immediate visitor broadcast, background AI)
     if (conv.mode === 'ai' && senderType === 'visitor') {
       conv.last_visitor_message_at = now;
 
-      // Broadcast visitor message immediately so UI reflects it
+      // 1. Save visitor message to DB and broadcast immediately (sub-5ms)
+      await granularStore.saveConversation(conv);
+
       await broadcastRealtimeEvent('chat_message', {
         conversationId: conv.id,
         message: newMsg,
@@ -168,6 +176,14 @@ export async function POST(req: NextRequest) {
         isHandoffRequested: false
       });
 
+      if (isFirstVisitorMsg) {
+        await broadcastRealtimeEvent('new_conversation', {
+          conversationId: conv.id,
+          conversation: conv
+        });
+      }
+
+      // 2. Generate AI response in background
       const historyForAI = conv.messages
         .filter(m => m.sender_type === 'visitor' || m.sender_type === 'ai')
         .map(m => ({
@@ -181,42 +197,54 @@ export async function POST(req: NextRequest) {
         property: 'Teals CRM'
       });
 
+      // Reload fresh conversation state from store
+      const freshConv = await granularStore.getConversation(conv.id) || conv;
+
+      // If user switched to human while AI was computing, discard stale AI message
+      if (freshConv.mode === 'human') {
+        return NextResponse.json({
+          success: true,
+          message: newMsg,
+          conversation: freshConv,
+          conversationId: freshConv.id
+        });
+      }
+
+      const freshMaxSeq = (freshConv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
       const aiMsg: StoreMessage = {
         id: 'msg_ai_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36),
-        conversation_id: conv.id,
+        conversation_id: freshConv.id,
         sender_type: 'ai',
         sender_name: 'Teals AI Agent',
         content: aiRes.text,
         is_whisper: false,
-        seq: newMsg.seq! + 1,
+        seq: freshMaxSeq + 1,
         created_at: new Date().toISOString()
       };
 
-      conv.messages.push(aiMsg);
-      conv.updated_at = new Date().toISOString();
+      freshConv.messages.push(aiMsg);
+      freshConv.updated_at = new Date().toISOString();
 
       if (aiRes.handoffRequired) {
-        conv.mode = 'human';
-        conv.status = 'pending_agent';
+        freshConv.mode = 'human';
+        freshConv.status = 'pending_agent';
       }
 
-      // Single atomic save with both visitor message and AI reply
-      await Promise.all([
-        broadcastRealtimeEvent('chat_message', {
-          conversationId: conv.id,
-          message: aiMsg,
-          conversation: conv,
-          isHandoffRequested: aiRes.handoffRequired
-        }),
-        granularStore.saveConversation(conv)
-      ]);
+      await granularStore.saveConversation(freshConv);
+
+      await broadcastRealtimeEvent('chat_message', {
+        conversationId: freshConv.id,
+        message: aiMsg,
+        conversation: freshConv,
+        isHandoffRequested: aiRes.handoffRequired
+      });
 
       return NextResponse.json({
         success: true,
         message: newMsg,
         aiMessage: aiMsg,
-        conversation: conv,
-        conversationId: conv.id
+        conversation: freshConv,
+        conversationId: freshConv.id
       });
     }
 
@@ -228,15 +256,21 @@ export async function POST(req: NextRequest) {
       conv.last_visitor_message_at = now;
     }
 
-    await Promise.all([
-      broadcastRealtimeEvent('chat_message', {
+    await granularStore.saveConversation(conv);
+
+    await broadcastRealtimeEvent('chat_message', {
+      conversationId: conv.id,
+      message: newMsg,
+      conversation: conv,
+      isHandoffRequested: false
+    });
+
+    if (isFirstVisitorMsg) {
+      await broadcastRealtimeEvent('new_conversation', {
         conversationId: conv.id,
-        message: newMsg,
-        conversation: conv,
-        isHandoffRequested: false
-      }),
-      granularStore.saveConversation(conv)
-    ]);
+        conversation: conv
+      });
+    }
 
     return NextResponse.json({
       success: true,
