@@ -231,12 +231,30 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           const data = await res.json();
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
             setMessages(dedupeMessages(data.conversation.messages));
-          } else if (data.messages && data.messages.length > 0) {
-            setMessages(dedupeMessages(data.messages));
-          }
-          if (data.conversation?.mode === 'human' && data.conversation.assigned_agent_name) {
-            setIsHumanConnected(true);
-            setAgentName(data.conversation.assigned_agent_name);
+            if (data.conversation.mode === 'human' && data.conversation.assigned_agent_name) {
+              setIsHumanConnected(true);
+              setAgentName(data.conversation.assigned_agent_name);
+            }
+          } else {
+            // Conversation does not exist on server (was reset or deleted)
+            try {
+              localStorage.removeItem('teals_conv_cache_' + targetConvId);
+              localStorage.removeItem('teals_active_conv_id');
+              localStorage.removeItem('teals_visitor_conv_list');
+            } catch {}
+            setSavedConversations([]);
+            setIsHumanConnected(false);
+            setAgentName(null);
+            setMessages([
+              {
+                id: 'init-greet',
+                sender_type: 'ai',
+                sender_name: 'Teals AI Agent',
+                content: DEFAULT_GREETING,
+                seq: 1,
+                status: 'read'
+              }
+            ]);
           }
         }
       } catch {}
@@ -417,19 +435,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             return;
           }
 
-          if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-            setMessages((prev) => {
-              const map = new Map<string, any>();
-              prev.forEach(m => map.set(m.id, m));
-              data.messages.forEach((m: any) => {
-                const existing = map.get(m.id);
-                map.set(m.id, {
-                  ...m,
-                  status: m.status || existing?.status || 'delivered'
-                });
-              });
-              return Array.from(map.values()).sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
-            });
+          if (data.conversation?.messages && data.conversation.messages.length > 0) {
+            setMessages(dedupeMessages(data.conversation.messages));
+          } else if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
+            setMessages(dedupeMessages(data.messages));
           }
           if (data.conversation) {
             if (data.conversation.mode === 'human' && data.conversation.assigned_agent_name) {
