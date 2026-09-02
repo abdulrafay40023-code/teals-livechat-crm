@@ -206,8 +206,10 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     };
 
     fetchMsgs();
+    const interval = setInterval(fetchMsgs, 2500);
 
     return () => {
+      clearInterval(interval);
       channelRef.current = null;
       channel.unsubscribe();
     };

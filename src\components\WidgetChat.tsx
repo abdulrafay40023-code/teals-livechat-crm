@@ -215,6 +215,37 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     restoreChatHistory();
   }, [visitorTokenProp, sessionIdProp, propertySlug, pageUrl, referrerUrl, userName, userEmail]);
 
+  // Auto-expire agent typing after 3.5s so it never gets stuck
+  useEffect(() => {
+    if (agentTypingText) {
+      const t = setTimeout(() => {
+        setAgentTypingText(null);
+      }, 3500);
+      return () => clearTimeout(t);
+    }
+  }, [agentTypingText]);
+
+  // Fast 2.5s fallback poll while chat is open to guarantee instant sync
+  useEffect(() => {
+    if (!isOpen || !conversationId) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/chat/message?conversationId=${encodeURIComponent(conversationId)}&t=${Date.now()}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.conversation?.messages && data.conversation.messages.length > 0) {
+            setMessages(prev => dedupeMessages([...prev, ...data.conversation.messages]));
+          }
+          if (data.conversation?.mode === 'human' && data.conversation.assigned_agent_name) {
+            setIsHumanConnected(true);
+            setAgentName(data.conversation.assigned_agent_name);
+          }
+        }
+      } catch {}
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [isOpen, conversationId]);
+
   // Real-Time WebSockets for Messages & Agent Typing
   useEffect(() => {
     if (!conversationId) return;
@@ -230,9 +261,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         const cId = (raw as Record<string, unknown>)?.conversationId as string | undefined;
         const message = (raw as Record<string, unknown>)?.message as { id: string; sender_type: string; sender_name: string; content: string; seq?: number; created_at?: string };
         const systemMessage = (raw as Record<string, unknown>)?.systemMessage as { id: string; sender_type: string; sender_name: string; content: string; seq?: number; created_at?: string };
-        const conv = (raw as Record<string, unknown>)?.conversation as { mode?: string; assigned_agent_name?: string };
+        const conv = (raw as Record<string, unknown>)?.conversation as { id?: string; visitor_id?: string; mode?: string; assigned_agent_name?: string };
 
-        const matches = !cId || cId === conversationId;
+        const matches = !cId || cId === conversationId || cId === visitorToken || (conv && (conv.id === conversationId || conv.visitor_id === visitorToken));
         if (matches) {
           // Immediately dismiss agent typing bubble when a message arrives from agent
           if (message?.sender_type === 'agent' || message?.sender_type === 'ai') {
@@ -260,7 +291,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         const senderType = (raw as Record<string, unknown>)?.senderType as string;
         const sName = (raw as Record<string, unknown>)?.senderName as string;
 
-        const matches = !cId || cId === conversationId;
+        const matches = !cId || cId === conversationId || cId === visitorToken;
         if (matches && senderType === 'agent') {
           if (isTyping) {
             setAgentTypingText(typingText || 'typing');
