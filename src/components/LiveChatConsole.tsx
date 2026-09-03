@@ -327,12 +327,11 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     };
 
     fetchMsgs();
-    const interval = setInterval(fetchMsgs, 4000);
+    const interval = setInterval(fetchMsgs, 1500);
 
     return () => {
       clearInterval(interval);
       channelRef.current = null;
-      supabase.removeChannel(channel);
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
@@ -787,7 +786,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 <div className="flex items-center space-x-2">
                   {isNeedsClaim ? (
                     <button
-                      onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
+                      onClick={() => setClaimModalOpen(true)}
                       disabled={claiming}
                       className="px-3.5 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold shadow-lg transition-all flex items-center space-x-1.5 animate-bounce disabled:opacity-50 cursor-pointer"
                     >
@@ -802,7 +801,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       </span>
                     ) : (
                       <button
-                        onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
+                        onClick={() => setClaimModalOpen(true)}
                         disabled={claiming}
                         className="px-3 py-1 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-bold transition-all flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
                       >
@@ -929,7 +928,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       </div>
                       <button
                         type="button"
-                        onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
+                        onClick={() => setClaimModalOpen(true)}
                         disabled={claiming}
                         className="px-4 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold transition-all shadow-md shadow-brand-rose/30 cursor-pointer"
                       >

@@ -606,12 +606,16 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setChatCount(0);
         setPageViews(0);
       })
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'TIMED_OUT' || status === 'CLOSED') {
+          setTimeout(() => channel.subscribe(), 1000);
+        }
+      });
 
     channelRef.current = channel;
 
-    // 8-second safety net reconciliation poll
-    const interval = setInterval(refreshSync, 8000);
+    // 2-second rapid reconciliation poll
+    const interval = setInterval(refreshSync, 2000);
 
     return () => {
       channelRef.current = null;

@@ -150,8 +150,6 @@ export async function POST(req: NextRequest) {
       conv.messages = conv.messages.filter(m => !(m.sender_type === 'system' && m.content.includes('Transferring to a live support agent')));
       conv.messages.push(handoffSystemMsg);
 
-      await granularStore.saveConversation(conv);
-
       await Promise.all([
         broadcastRealtimeEvent('chat_message', {
           conversationId: conv.id,
@@ -163,7 +161,8 @@ export async function POST(req: NextRequest) {
         broadcastRealtimeEvent('new_conversation', {
           conversationId: conv.id,
           conversation: conv
-        })
+        }),
+        granularStore.saveConversation(conv)
       ]);
 
       return NextResponse.json({
@@ -178,22 +177,20 @@ export async function POST(req: NextRequest) {
     if (conv.mode === 'ai' && senderType === 'visitor') {
       conv.last_visitor_message_at = now;
 
-      // 1. Save visitor message to DB and broadcast immediately (sub-5ms)
-      await granularStore.saveConversation(conv);
-
-      await broadcastRealtimeEvent('chat_message', {
-        conversationId: conv.id,
-        message: newMsg,
-        conversation: conv,
-        isHandoffRequested: false
-      });
-
-      if (isFirstVisitorMsg) {
-        await broadcastRealtimeEvent('new_conversation', {
+      // 1. Broadcast visitor message instantly in parallel with storage
+      await Promise.all([
+        broadcastRealtimeEvent('chat_message', {
+          conversationId: conv.id,
+          message: newMsg,
+          conversation: conv,
+          isHandoffRequested: false
+        }),
+        isFirstVisitorMsg ? broadcastRealtimeEvent('new_conversation', {
           conversationId: conv.id,
           conversation: conv
-        });
-      }
+        }) : Promise.resolve(),
+        granularStore.saveConversation(conv)
+      ]);
 
       // 2. Generate AI response in background
       const historyForAI = conv.messages
@@ -222,34 +219,34 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const freshMaxSeq = (freshConv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
+      const aiMsgId = 'msg_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
       const aiMsg: StoreMessage = {
-        id: 'msg_ai_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36),
+        id: aiMsgId,
         conversation_id: freshConv.id,
         sender_type: 'ai',
         sender_name: 'Teals AI Agent',
         content: aiRes.text,
         is_whisper: false,
-        seq: freshMaxSeq + 1,
+        seq: (freshConv.messages.length || 0) + 1,
         created_at: new Date().toISOString()
       };
 
       freshConv.messages.push(aiMsg);
       freshConv.updated_at = new Date().toISOString();
-
       if (aiRes.handoffRequired) {
         freshConv.mode = 'human';
         freshConv.status = 'pending_agent';
       }
 
-      await granularStore.saveConversation(freshConv);
-
-      await broadcastRealtimeEvent('chat_message', {
-        conversationId: freshConv.id,
-        message: aiMsg,
-        conversation: freshConv,
-        isHandoffRequested: aiRes.handoffRequired
-      });
+      await Promise.all([
+        broadcastRealtimeEvent('chat_message', {
+          conversationId: freshConv.id,
+          message: aiMsg,
+          conversation: freshConv,
+          isHandoffRequested: aiRes.handoffRequired
+        }),
+        granularStore.saveConversation(freshConv)
+      ]);
 
       return NextResponse.json({
         success: true,
@@ -268,21 +265,19 @@ export async function POST(req: NextRequest) {
       conv.last_visitor_message_at = now;
     }
 
-    await granularStore.saveConversation(conv);
-
-    await broadcastRealtimeEvent('chat_message', {
-      conversationId: conv.id,
-      message: newMsg,
-      conversation: conv,
-      isHandoffRequested: false
-    });
-
-    if (isFirstVisitorMsg) {
-      await broadcastRealtimeEvent('new_conversation', {
+    await Promise.all([
+      broadcastRealtimeEvent('chat_message', {
+        conversationId: conv.id,
+        message: newMsg,
+        conversation: conv,
+        isHandoffRequested: false
+      }),
+      isFirstVisitorMsg ? broadcastRealtimeEvent('new_conversation', {
         conversationId: conv.id,
         conversation: conv
-      });
-    }
+      }) : Promise.resolve(),
+      granularStore.saveConversation(conv)
+    ]);
 
     return NextResponse.json({
       success: true,
