@@ -166,6 +166,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       if (savedEmail) setUserEmail(savedEmail);
       if (savedName && savedEmail && submitted === 'true') {
         setHasSubmittedLead(true);
+        setViewingHistory(true);
       } else {
         setHasSubmittedLead(false);
       }
@@ -894,7 +895,11 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           <div onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(false);
+            if (hasSubmittedLead) {
+              handleOpenConversations();
+            } else {
+              setViewingHistory(false);
+            }
           }} className="flex items-center space-x-2">
             <span className="text-xs font-semibold text-gray-800">{DEFAULT_GREETING}</span>
           </div>
@@ -917,7 +922,11 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(false);
+            if (hasSubmittedLead) {
+              handleOpenConversations();
+            } else {
+              setViewingHistory(false);
+            }
           }}
           className="w-14 h-14 rounded-full bg-white border-2 border-white shadow-2xl hover:scale-105 transition-all flex items-center justify-center relative group p-0 overflow-hidden"
           style={{ background: 'transparent' }}
