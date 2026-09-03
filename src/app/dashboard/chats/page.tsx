@@ -47,7 +47,10 @@ export default function ChatsPage() {
         currentAgent={currentAgent || { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' }}
         selectedChatId={selectedChatId}
         conversations={conversations as unknown as ChatSession[]}
-        onSelectChat={(id) => setSelectedChatId(id || null)}
+        onSelectChat={(id) => {
+          setSelectedChatId(id || null);
+          if (id) markConversationAsRead(id);
+        }}
         onClaimSuccess={handleClaimSuccess}
         onMarkRead={markConversationAsRead}
       />

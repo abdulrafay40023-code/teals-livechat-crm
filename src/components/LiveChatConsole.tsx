@@ -130,14 +130,33 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     const visitorMsgs = conv.messages.filter(m => m.sender_type === 'visitor');
     if (visitorMsgs.length === 0) return 0;
 
+    const lastVisitorMsg = visitorMsgs[visitorMsgs.length - 1];
+    const lastVisitorTime = new Date(lastVisitorMsg.created_at || 0).getTime();
+
     const readVal = readConvMap?.[conv.id];
     if (!readVal) return visitorMsgs.length;
 
-    const readTime = new Date(readVal).getTime();
-    if (isNaN(readTime)) return 0;
+    let savedId = '';
+    let readTime = 0;
+
+    if (typeof readVal === 'string' && readVal.includes('__')) {
+      const [mId, rTime] = readVal.split('__');
+      savedId = mId;
+      readTime = Number(rTime);
+    } else if (typeof readVal === 'string') {
+      savedId = readVal;
+      readTime = new Date(readVal).getTime();
+    }
+
+    if (savedId && (savedId === lastVisitorMsg.id || savedId === 'all')) return 0;
+    if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return 0;
 
     // Return the number of visitor messages sent AFTER the last read time
-    return visitorMsgs.filter(m => new Date(m.created_at || 0).getTime() > readTime).length;
+    return visitorMsgs.filter(m => {
+      if (savedId && m.id === savedId) return false;
+      const mTime = new Date(m.created_at || 0).getTime();
+      return mTime > (readTime + 120000);
+    }).length;
   };
 
   const handleDeleteChat = async (id: string) => {
@@ -602,7 +621,10 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 return (
                   <div
                     key={conv.id}
-                    onClick={() => onSelectChat(conv.id)}
+                    onClick={() => {
+                      onSelectChat(conv.id);
+                      onMarkRead?.(conv.id);
+                    }}
                     className={`p-3.5 cursor-pointer transition-all hover:bg-[#131d33] group relative ${
                       isSelected ? 'bg-[#152038] border-l-4 border-brand-primary' : 'bg-transparent'
                     }`}

@@ -160,9 +160,17 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       // If marked read by ID or read timestamp is >= last visitor message timestamp
       const readVal = readMap[c.id];
       if (readVal) {
-        if (readVal === lastVisitorMsg.id) return false;
-        const readTime = new Date(readVal).getTime();
-        if (!isNaN(readTime) && readTime >= lastVisitorTime) return false;
+        if (typeof readVal === 'string' && readVal.includes('__')) {
+          const [savedMsgId, readTimeStr] = readVal.split('__');
+          if (savedMsgId && (savedMsgId === lastVisitorMsg.id || savedMsgId === 'all')) return false;
+          const readTime = Number(readTimeStr);
+          if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return false;
+        } else {
+          const savedId = typeof readVal === 'string' ? readVal : (readVal as any)?.msgId;
+          if (savedId && (savedId === lastVisitorMsg.id || savedId === 'all')) return false;
+          const readTime = typeof readVal === 'string' ? new Date(readVal).getTime() : (readVal as any)?.readAt;
+          if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return false;
+        }
       }
 
       return true;
@@ -174,13 +182,19 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const markConversationAsRead = useCallback((convId: string) => {
     if (!convId) return;
 
-    const nowIso = new Date().toISOString();
-    const storageKey = getUserStorageKey();
-
     setReadConvMap(rMap => {
-      const next = { ...rMap, [convId]: nowIso };
+      // Find latest visitor message in current state to store exact message ID
+      const conv = conversations.find(c => c.id === convId);
+      const vMsgs = (conv?.messages || []).filter(m => m.sender_type === 'visitor');
+      const lastMsgId = vMsgs.length > 0 ? vMsgs[vMsgs.length - 1].id : 'all';
+
+      // Store composite string: msgId__futureTimestamp (100% type-safe string and clock skew proof)
+      const readEntry = `${lastMsgId}__${Date.now() + 300000}`;
+
+      const next = { ...rMap, [convId]: readEntry };
       if (typeof window !== 'undefined') {
         try {
+          const storageKey = getUserStorageKey();
           localStorage.setItem(storageKey, JSON.stringify(next));
         } catch {}
       }
@@ -205,7 +219,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         readerName: currentUser?.full_name || 'Agent'
       }
     });
-  }, []);
+  }, [conversations]);
 
   const knownSessionIds = useRef<Set<string>>(new Set());
   const initialLoadDone = useRef(false);
