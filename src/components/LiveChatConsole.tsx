@@ -78,6 +78,7 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const typingPreviewEndRef = useRef<HTMLDivElement>(null);
   const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const agentInputRef = useRef<HTMLTextAreaElement>(null);
 
   // ROLE-BASED VISIBILITY FILTERING
   const isAdmin = currentAgent.role === 'admin' || currentAgent.email === 'garryamelia6265@gmail.com';
@@ -549,6 +550,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     const text = inputText.trim();
     setInputText('');
     setSending(true);
+    agentInputRef.current?.focus();
 
     if (typingTimerRef.current) {
       clearTimeout(typingTimerRef.current);
@@ -607,6 +609,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       console.error(err);
     } finally {
       setSending(false);
+      setTimeout(() => {
+        agentInputRef.current?.focus();
+      }, 10);
     }
   };
 
@@ -970,16 +975,18 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
                     <div className="flex items-center space-x-2">
                       <textarea
+                        ref={agentInputRef}
                         value={inputText}
                         onChange={(e) => handleAgentInputChange(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             handleSendMessage(e);
+                            agentInputRef.current?.focus();
                           }
                         }}
                         rows={1}
-                        disabled={(!isClaimedByMe && !isAdmin) || sending}
+                        disabled={!isClaimedByMe && !isAdmin}
                         placeholder={
                           isClaimedByMe || isAdmin
                             ? 'Type reply as support agent (Enter to send)...'

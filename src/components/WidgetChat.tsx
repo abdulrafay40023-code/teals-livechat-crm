@@ -123,7 +123,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   const fetchVisitorConversations = async (token: string, email?: string) => {
     try {
-      const res = await fetch(`/api/chat/message?visitorToken=${encodeURIComponent(token)}${email ? `&email=${encodeURIComponent(email)}` : ''}`);
+      const cleanEmail = email || userEmail || (typeof window !== 'undefined' ? localStorage.getItem('teals_lead_email') || '' : '');
+      const res = await fetch(`/api/chat/message?visitorToken=${encodeURIComponent(token)}${cleanEmail ? `&email=${encodeURIComponent(cleanEmail)}` : ''}`);
       if (res.ok) {
         const data = await res.json();
         if (data.conversations && Array.isArray(data.conversations) && data.conversations.length > 0) {
@@ -136,10 +137,32 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               updatedAt: timeStr
             };
           });
-          setSavedConversations(mapped);
-          try {
-            localStorage.setItem('teals_visitor_conv_list', JSON.stringify(mapped));
-          } catch {}
+
+          setSavedConversations(prev => {
+            const map = new Map<string, SavedConvSummary>();
+            prev.forEach(c => map.set(c.id, c));
+            mapped.forEach(c => map.set(c.id, c));
+            const merged = Array.from(map.values());
+            try {
+              localStorage.setItem('teals_visitor_conv_list', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+
+          // If current active chat is empty or fresh, automatically load the latest conversation's messages
+          setMessages(currentMsgs => {
+            if (currentMsgs.length <= 1 && data.conversations[0]?.messages?.length > 1) {
+              const latest = data.conversations[0];
+              setConversationId(latest.id);
+              try { localStorage.setItem('teals_active_conv_id', latest.id); } catch {}
+              if (latest.mode === 'human' && latest.assigned_agent_name) {
+                setIsHumanConnected(true);
+                setAgentName(latest.assigned_agent_name);
+              }
+              return dedupeMessages(latest.messages);
+            }
+            return currentMsgs;
+          });
         }
       }
     } catch {}
@@ -843,7 +866,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           onClick={() => {
             setIsOpen(true);
             setShowGreetingBubble(false);
-            setViewingHistory(true);
+            setViewingHistory(false);
           }}
           className="w-14 h-14 rounded-full bg-white border-2 border-white shadow-2xl hover:scale-105 transition-all flex items-center justify-center relative group p-0 overflow-hidden"
           style={{ background: 'transparent' }}
@@ -864,7 +887,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           {/* Header */}
           <div className="p-3 px-4 bg-gradient-to-r from-blue-900/40 via-[#11192e] to-[#11192e] border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
-              {hasSubmittedLead && !viewingHistory && (
+              {hasSubmittedLead && !viewingHistory ? (
                 <button
                   onClick={() => setViewingHistory(true)}
                   className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700 flex-shrink-0"
@@ -872,7 +895,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   <ChevronLeft className="w-3.5 h-3.5" />
                   <span>Back</span>
                 </button>
-              )}
+              ) : viewingHistory && hasSubmittedLead ? (
+                <button
+                  onClick={() => setViewingHistory(false)}
+                  className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700 flex-shrink-0"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <span>Chat</span>
+                </button>
+              ) : null}
               <AgentAvatar
                 type={isHumanConnected ? (agentName ? 'male' : 'female') : 'ai'}
                 name={agentName || ''}
