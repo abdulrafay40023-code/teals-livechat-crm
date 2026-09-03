@@ -282,6 +282,22 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       // NON-DESTRUCTIVE UNION MERGE: never let a background sync poll erase newer messages received via WebSockets
       setConversations(prev => {
+        if (prev.length === convsList.length) {
+          const hasDiff = convsList.some(apiConv => {
+            const p = prev.find(x => x.id === apiConv.id);
+            if (!p) return true;
+            if ((p.messages?.length || 0) !== (apiConv.messages?.length || 0)) return true;
+            if (p.mode !== apiConv.mode || p.status !== apiConv.status) return true;
+            if (p.assigned_agent_id !== apiConv.assigned_agent_id) return true;
+            const pLast = p.messages?.[p.messages.length - 1]?.id;
+            const aLast = apiConv.messages?.[apiConv.messages.length - 1]?.id;
+            return pLast !== aLast;
+          });
+          if (!hasDiff) {
+            return prev; // Return existing reference to prevent any glitch or UI jump
+          }
+        }
+
         const prevMap = new Map(prev.map(c => [c.id, c]));
 
         const updatedList: LiveConversation[] = convsList.map(apiConv => {

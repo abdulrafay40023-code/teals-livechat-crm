@@ -84,8 +84,28 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
 
   const { readConvMap, deleteConversation } = useLiveSync();
 
-  // All conversations are visible to both Admin and Agents with appropriate action tags
-  const visibleConversations = conversations;
+  // ROLE-BASED VISIBILITY: Admin sees everything; Regular agents only see handoff requests & their claimed chats
+  const visibleConversations = conversations.filter((conv) => {
+    if (isAdmin) return true;
+
+    const isMine = !!(
+      (conv.assigned_agent_id && (
+        conv.assigned_agent_id === currentAgent.id ||
+        conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+      )) ||
+      (conv.assigned_agent_name && (
+        conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+      )) ||
+      (conv.assigned_agent_email && (
+        conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+      ))
+    );
+    if (isMine) return true;
+
+    // Unclaimed chats that requested a real human agent
+    const isNeedsHuman = !conv.assigned_agent_id && !conv.assigned_agent_name && (conv.mode === 'human' || conv.status === 'pending_agent');
+    return isNeedsHuman;
+  });
 
   // Sort visible conversations so the one with the latest message is ALWAYS at the very top (WhatsApp style)
   const sortedVisibleConversations = [...visibleConversations].sort((a, b) => {
@@ -285,8 +305,12 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.messages && Array.isArray(data.messages) && targetId === selectedConv?.id) {
+          if (Array.isArray(data.messages)) {
             setMessages(prev => {
+              if (prev.length === data.messages.length) {
+                const isIdentical = prev.every((m, idx) => m.id === data.messages[idx]?.id && m.status === data.messages[idx]?.status);
+                if (isIdentical) return prev;
+              }
               const map = new Map<string, any>();
               prev.forEach(m => {
                 if (!m.conversation_id || m.conversation_id === targetId) {
@@ -310,17 +334,13 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
-  // Auto-select latest active conversation if none selected, or reset if conversations is empty
+  // Reset selected chat only if conversations become completely empty
   useEffect(() => {
-    if (conversations.length === 0) {
-      if (selectedChatId) onSelectChat('');
+    if (conversations.length === 0 && selectedChatId) {
+      onSelectChat('');
       setMessages([]);
-      return;
     }
-    if ((!selectedChatId || !conversations.some(c => c.id === selectedChatId)) && sortedVisibleConversations.length > 0) {
-      onSelectChat(sortedVisibleConversations[0].id);
-    }
-  }, [selectedChatId, conversations.length, sortedVisibleConversations.length]);
+  }, [conversations.length, selectedChatId]);
 
   const prevConvIdRef = useRef<string | null>(null);
 
@@ -830,69 +850,86 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 </div>
               )}
 
-              {/* Message Stream (ALWAYS visible, never locked out) */}
-              <div
-                ref={chatContainerRef}
-                onScroll={handleChatScroll}
-                className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
-              >
-                    {messages.map((m) => {
-                      const isVisitor = m.sender_type === 'visitor';
-                      const isSystem = m.sender_type === 'system';
-                      const isAi = m.sender_type === 'ai';
-                      const isWhisper = m.is_whisper;
+              {/* Message Stream with Optional Blurred Claim Overlay */}
+              <div className="relative flex-1 min-h-0 flex flex-col">
+                <div
+                  ref={chatContainerRef}
+                  onScroll={handleChatScroll}
+                  className={`flex-1 min-h-0 overflow-y-auto p-4 space-y-3 transition-all duration-300 ${
+                    isNeedsClaim && !isAdmin ? 'filter blur-sm select-none pointer-events-none' : ''
+                  }`}
+                >
+                  {messages.map((m) => {
+                    const isVisitor = m.sender_type === 'visitor';
+                    const isSystem = m.sender_type === 'system';
+                    const isAi = m.sender_type === 'ai';
+                    const isWhisper = m.is_whisper;
 
-                      if (isSystem) {
-                        return (
-                          <div key={m.id} className="text-center my-2">
-                            <span className="text-[10px] px-3 py-1 rounded-full bg-dark-surface border border-dark-border text-dark-muted font-medium">
-                              {m.content}
-                            </span>
-                          </div>
-                        );
-                      }
-
+                    if (isSystem) {
                       return (
-                        <div
-                          key={m.id}
-                          className={`flex flex-col ${isVisitor ? 'items-start' : 'items-end'}`}
-                        >
-                          <div className="flex items-center space-x-1.5 mb-1 px-1">
-                            <span className="text-[10px] font-bold text-dark-muted">{m.sender_name}</span>
-                            {isWhisper && (
-                              <span className="text-[9px] bg-brand-amber/15 text-brand-amber px-1.5 py-0.2 rounded font-bold">
-                                Whisper (Private)
-                              </span>
-                            )}
-                            {isAi && (
-                              <span className="text-[9px] bg-blue-500/15 text-blue-400 px-1.5 py-0.2 rounded font-bold">
-                                AI
-                              </span>
-                            )}
-                          </div>
-                          <div
-                            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed shadow-sm break-words whitespace-pre-wrap ${
-                              isVisitor
-                                ? 'bg-gradient-to-r from-red-600 to-rose-600 text-white rounded-tl-none'
-                                : isWhisper
-                                ? 'bg-brand-amber/10 border border-brand-amber/30 text-brand-amber rounded-tr-none'
-                                : isAi
-                                ? 'bg-blue-950/60 border border-blue-900/50 text-blue-100 rounded-tr-none'
-                                : 'bg-dark-card border border-dark-border text-white rounded-tr-none'
-                            }`}
-                          >
+                        <div key={m.id} className="text-center my-2">
+                          <span className="text-[10px] px-3 py-1 rounded-full bg-dark-surface border border-dark-border text-dark-muted font-medium">
                             {m.content}
-                            <div className={`flex items-center space-x-1.5 mt-1.5 ${isVisitor ? 'justify-start text-white/70' : 'justify-end text-dark-muted'}`}>
-                              <span className="text-[9px]">
-                                {new Date(m.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                          </div>
+                          </span>
                         </div>
                       );
-                    })}
-                    <div ref={messagesEndRef} />
+                    }
+
+                    return (
+                      <div
+                        key={m.id}
+                        className={`flex flex-col ${isVisitor ? 'items-start' : 'items-end'}`}
+                      >
+                        <div className="flex items-center space-x-1.5 mb-1 px-1">
+                          <span className="text-[10px] font-semibold text-dark-muted">
+                            {isVisitor ? selectedConv.visitor_name : m.sender_name}
+                          </span>
+                          <span className="text-[9px] text-dark-muted">
+                            {new Date(m.created_at || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <div
+                          className={`max-w-[75%] rounded-2xl px-3.5 py-2 text-xs leading-relaxed ${
+                            isWhisper
+                              ? 'bg-brand-amber/15 text-brand-amber border border-brand-amber/30 italic'
+                              : isVisitor
+                              ? 'bg-brand-rose text-white rounded-bl-sm shadow-md'
+                              : isAi
+                              ? 'bg-blue-900/60 text-blue-100 border border-blue-700/50 rounded-br-sm'
+                              : 'bg-blue-600 text-white rounded-br-sm shadow-md'
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">{m.content}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Centered Claim Card with Blur Overlay */}
+                {isNeedsClaim && !isAdmin && (
+                  <div className="absolute inset-0 z-20 backdrop-blur-md bg-[#0a0f1d]/75 flex flex-col items-center justify-center p-6 text-center space-y-4 animate-in fade-in duration-200">
+                    <div className="w-16 h-16 rounded-3xl bg-brand-rose/15 border border-brand-rose/30 flex items-center justify-center text-brand-rose animate-pulse shadow-2xl shadow-brand-rose/25">
+                      <Lock className="w-8 h-8" />
+                    </div>
+                    <div className="space-y-1.5 max-w-sm">
+                      <h3 className="text-base font-bold text-white tracking-tight">Human Support Requested</h3>
+                      <p className="text-xs text-dark-muted leading-relaxed">
+                        {selectedConv.visitor_name || 'Customer'} requested to speak with a real person. Claim this conversation to verify your details and start chatting.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setClaimModalOpen(true)}
+                      disabled={claiming}
+                      className="px-8 py-3 rounded-2xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold shadow-xl shadow-brand-rose/30 transition-all flex items-center space-x-2 cursor-pointer transform hover:scale-105 active:scale-95 disabled:opacity-50"
+                    >
+                      <UserPlus className="w-4 h-4" />
+                      <span>{claiming ? 'Claiming Chat...' : 'Claim Chat Now'}</span>
+                    </button>
                   </div>
+                )}
+              </div>
 
                   {/* Real-time Ghost Keystroke Preview Bar with Auto-Wrap & Scroll */}
                   {liveTypingPreview && (isClaimedByMe || isAdmin || isAiAutomated) && !isClaimedByOther && (
@@ -905,23 +942,6 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                           <div ref={typingPreviewEndRef} />
                         </div>
                       </div>
-                    </div>
-                  )}
-
-                  {isNeedsClaim && !isAdmin && (
-                    <div className="px-4 py-2.5 bg-brand-rose/15 border-t border-brand-rose/30 flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <UserPlus className="w-4 h-4 text-brand-rose animate-bounce" />
-                        <span className="text-xs text-brand-rose font-medium">Customer requested a live agent</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setClaimModalOpen(true)}
-                        disabled={claiming}
-                        className="px-4 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold transition-all shadow-md shadow-brand-rose/30 cursor-pointer"
-                      >
-                        {claiming ? 'Claiming...' : 'Claim Chat to Reply'}
-                      </button>
                     </div>
                   )}
 
