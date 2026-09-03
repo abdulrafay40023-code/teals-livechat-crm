@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, User, Mail, ArrowRight, Sparkles, PlusCircle, Eye, History, MessageSquare, ChevronLeft } from 'lucide-react';
+import { X, Send, User, Mail, ArrowRight, Sparkles, PlusCircle, Eye, History, MessageSquare, ChevronLeft, AlertCircle } from 'lucide-react';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { supabase } from '@/lib/supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
@@ -88,6 +88,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [viewingHistory, setViewingHistory] = useState(false);
   const [savedConversations, setSavedConversations] = useState<SavedConvSummary[]>([]);
+  const [showChatLimitModal, setShowChatLimitModal] = useState(false);
 
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -672,8 +673,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     } catch {}
   };
 
-  // Start a brand new conversation and preserve old ones
+  // Start a brand new conversation and preserve old ones (Max 2 chats limit)
   const handleStartNewChat = async () => {
+    if (savedConversations.length >= 2) {
+      setShowChatLimitModal(true);
+      return;
+    }
+
     // 1. Snapshot current conversation to history list & cache
     let currentList = [...savedConversations];
     if (conversationId) {
@@ -799,7 +805,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       return actions.some(a => clean.includes(a)) && humans.some(h => clean.includes(h));
     };
 
-    const isHandoff = cleanHandoffCheck(userText) && !isHumanConnected;
+    const isAlreadyHuman = isHumanConnected || !!agentName || (conversationId ? messages.some(m => m.sender_type === 'agent' || (m.sender_type === 'system' && (m.content.includes('claimed and joined') || m.content.includes('taken over') || m.content.includes('transferred to')))) : false);
+    const isHandoff = !isAlreadyHuman && cleanHandoffCheck(userText);
 
     const optimisticSysMsg = isHandoff ? {
       id: 'msg_sys_handoff_' + (conversationId || clientMsgId),
@@ -943,7 +950,31 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
       {/* Chat Window */}
       {isOpen && (
-        <div className="w-[350px] sm:w-[380px] h-[520px] bg-[#0d1322] border border-gray-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-200">
+        <div className="w-[350px] sm:w-[380px] h-[520px] bg-[#0d1322] border border-gray-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden backdrop-blur-2xl animate-in fade-in slide-in-from-bottom-4 duration-200 relative">
+          {/* 2-Chat Limit Modal */}
+          {showChatLimitModal && (
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-5 animate-in fade-in duration-200">
+              <div className="bg-[#11192e] border border-blue-500/40 rounded-2xl p-5 max-w-[310px] w-full text-center space-y-3.5 shadow-2xl animate-in zoom-in-95 duration-150">
+                <div className="w-12 h-12 rounded-full bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto text-blue-400">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white tracking-tight">Chat Limit Reached</h4>
+                  <p className="text-xs text-gray-300 mt-2 leading-relaxed">
+                    Aap 2 se zyada new chats start nahi kar sakte. Inhi 2 chats mein aap live agent se baat kar sakte hain. Message bhej dein, agent ka reply aa jayega. Thori der baad check karein.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowChatLimitModal(false)}
+                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-lg cursor-pointer"
+                >
+                  Theek Hai / Understood
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Header */}
           <div className="p-3 px-4 bg-gradient-to-r from-blue-900/40 via-[#11192e] to-[#11192e] border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">

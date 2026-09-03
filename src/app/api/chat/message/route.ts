@@ -82,6 +82,17 @@ export async function POST(req: NextRequest) {
     const isHumanMode = conv?.mode === 'human' || isHumanConnected || hasAgentAssigned || hasAgentMessages || hasClaimSystemMsg;
 
     if (!conv) {
+      // Strict 2-chat limit per visitor to prevent spam & abuse
+      if (senderEmail || visitorToken) {
+        const existingList = await granularStore.getConversationsByVisitor(visitorToken || '', senderEmail || undefined);
+        if (existingList.length >= 2) {
+          return NextResponse.json({
+            error: 'Maximum 2 conversations allowed per visitor.',
+            limitReached: true
+          }, { status: 400 });
+        }
+      }
+
       conv = {
         id: convId,
         property_slug: propertySlug,
@@ -140,11 +151,11 @@ export async function POST(req: NextRequest) {
     conv.updated_at = now;
     conv.typing_preview = '';
 
-    const isAlreadyHandledByHuman = isHumanMode && hasAgentAssigned;
+    const isAlreadyHandledByHuman = isHumanMode || hasAgentAssigned || hasAgentMessages || hasClaimSystemMsg;
     const humanRequested = senderType === 'visitor' && isHumanHandoffRequested(content) && !isAlreadyHandledByHuman;
 
     // CASE 1: Visitor requested fresh human handoff (AI -> Human transition)
-    if (humanRequested && !hasAgentAssigned) {
+    if (humanRequested && !isAlreadyHandledByHuman) {
       console.log('[CHAT_DEBUG] Visitor explicitly requested human handoff:', content);
       conv.mode = 'human';
       conv.status = 'pending_agent';

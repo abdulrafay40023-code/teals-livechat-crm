@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, Send,
-  Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2
+  Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2,
+  Sparkles, UserCheck, ArrowRightLeft, X
 } from 'lucide-react';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { getCountryFlagUrl } from '@/lib/flags';
@@ -73,6 +74,12 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [liveTypingPreview, setLiveTypingPreview] = useState<string | null>(null);
+  const [inboxTab, setInboxTab] = useState<'all' | 'new' | 'claimed'>('all');
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [transferAgentName, setTransferAgentName] = useState('');
+  const [transferAgentEmail, setTransferAgentEmail] = useState('');
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingPreviewEndRef = useRef<HTMLDivElement>(null);
@@ -122,6 +129,27 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     };
     return getLatestTime(b) - getLatestTime(a);
   });
+
+  // Separate into New Unclaimed Chats vs Active & Claimed Chats
+  const newChats = sortedVisibleConversations.filter(c => !c.assigned_agent_id && !c.assigned_agent_name);
+  const claimedChats = sortedVisibleConversations.filter(c => !!(c.assigned_agent_id || c.assigned_agent_name));
+
+  // Map to identify which chat number a conversation is when visitor has multiple
+  const emailToConvs = new Map<string, ChatSession[]>();
+  sortedVisibleConversations.forEach(c => {
+    const key = (c.visitor_email || c.visitor_name || c.id).toLowerCase();
+    if (!emailToConvs.has(key)) emailToConvs.set(key, []);
+    emailToConvs.get(key)!.push(c);
+  });
+
+  const getChatBadge = (conv: ChatSession) => {
+    const key = (conv.visitor_email || conv.visitor_name || conv.id).toLowerCase();
+    const group = emailToConvs.get(key) || [];
+    if (group.length <= 1) return null;
+    const sortedChronological = [...group].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    const idx = sortedChronological.findIndex(c => c.id === conv.id);
+    return idx >= 0 ? `Chat #${idx + 1}` : null;
+  };
 
   // Calculate unread count for each conversation
   const getUnreadCountForConv = (conv: ChatSession) => {
@@ -626,6 +654,156 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     }
   };
 
+  // Transfer chat to another agent / admin
+  const handleTransferChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedConv?.id || !transferAgentName.trim()) return;
+
+    setTransferring(true);
+    setTransferError(null);
+    try {
+      const res = await fetch('/api/agent/claim-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversationId: selectedConv.id,
+          agentName: transferAgentName.trim(),
+          agentEmail: transferAgentEmail.trim() || undefined,
+          force: true
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setTransferModalOpen(false);
+        setTransferAgentName('');
+        setTransferAgentEmail('');
+        onClaimSuccess?.(selectedConv.id);
+      } else {
+        setTransferError(data.error || 'Failed to transfer chat.');
+      }
+    } catch {
+      setTransferError('Network error while transferring chat.');
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const renderConvItem = (conv: ChatSession) => {
+    const isSelected = conv.id === selectedConv?.id;
+    const isConvMine = !!(
+      (conv.assigned_agent_id && (
+        conv.assigned_agent_id === currentAgent.id ||
+        conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+      )) ||
+      (conv.assigned_agent_name && (
+        conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+      )) ||
+      (conv.assigned_agent_email && (
+        conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+      ))
+    );
+    const isConvClaimedOther = !!(conv.assigned_agent_id || conv.assigned_agent_name) && !isConvMine;
+    const isConvNeedsClaim = !isConvMine && !isConvClaimedOther && (conv.mode === 'human' || conv.status === 'pending_agent');
+
+    const flagSrc = getCountryFlagUrl(conv.visitor?.country_code || 'PK');
+    const lastMsg = conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+    const unreadCount = getUnreadCountForConv(conv);
+    const isTyping = !!(conv.typing_preview && conv.typing_preview.trim().length > 0);
+    const chatBadge = getChatBadge(conv);
+
+    return (
+      <div
+        key={conv.id}
+        onClick={() => {
+          onSelectChat(conv.id);
+          onMarkRead?.(conv.id);
+        }}
+        className={`p-3.5 cursor-pointer transition-all hover:bg-[#131d33] group relative ${
+          isSelected ? 'bg-[#152038] border-l-4 border-brand-primary' : 'bg-transparent'
+        }`}
+      >
+        <div className="flex items-start justify-between">
+          <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-2">
+            <img
+              src={flagSrc}
+              alt="Flag"
+              className="w-5 h-3.5 object-cover rounded shadow-sm flex-shrink-0"
+              onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+            />
+            <div className="min-w-0 flex-1">
+              <h4 className="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
+                <span className="truncate">{conv.visitor_name}</span>
+                {chatBadge && (
+                  <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/40 flex-shrink-0">
+                    {chatBadge}
+                  </span>
+                )}
+                {conv.visitor_email && (
+                  <span className="text-[10px] font-normal text-dark-muted truncate">({conv.visitor_email})</span>
+                )}
+              </h4>
+              <p className="text-[11px] text-dark-muted truncate max-w-[170px] mt-0.5">
+                {isTyping ? (
+                  <span className="text-brand-emerald italic font-medium">typing...</span>
+                ) : lastMsg ? (
+                  lastMsg.sender_type === 'agent' ? (
+                    <span><span className="text-gray-400">You: </span>{lastMsg.content}</span>
+                  ) : (
+                    <span className={unreadCount > 0 ? 'text-white font-semibold' : 'text-dark-muted'}>{lastMsg.content}</span>
+                  )
+                ) : (
+                  conv.visitor?.current_page || '/'
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-1.5 flex-shrink-0 ml-1">
+            {unreadCount > 0 && (
+              <span className="min-w-[18px] h-[18px] px-1.5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40 animate-pulse flex-shrink-0">
+                {unreadCount}
+              </span>
+            )}
+
+            {isConvMine ? (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/30 flex items-center space-x-1">
+                <Lock className="w-2.5 h-2.5" />
+                <span>Claimed (You)</span>
+              </span>
+            ) : isConvClaimedOther ? (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-amber/15 text-brand-amber border border-brand-amber/30 flex items-center space-x-1">
+                <Lock className="w-2.5 h-2.5" />
+                <span>{conv.assigned_agent_name || 'Claimed'}</span>
+              </span>
+            ) : isConvNeedsClaim ? (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-rose/15 text-brand-rose border border-brand-rose/30 animate-pulse">
+                NEEDS CLAIM
+              </span>
+            ) : (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center space-x-1">
+                <Bot className="w-2.5 h-2.5" />
+                <span>AI Active</span>
+              </span>
+            )}
+
+            {(isAdmin || isConvMine) && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteChat(conv.id);
+                }}
+                title="Delete Chat"
+                className="p-1 rounded-lg text-dark-muted hover:text-rose-400 hover:bg-rose-500/15 transition-all opacity-0 group-hover:opacity-100"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <>
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[650px] bg-dark-card border border-dark-border rounded-2xl overflow-hidden shadow-2xl">
@@ -643,6 +821,54 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
             </span>
           </div>
 
+          {/* New Chats vs Claimed Filter Tabs */}
+          <div className="flex items-center space-x-1 p-2 bg-[#080d1a] border-b border-dark-border">
+            <button
+              type="button"
+              onClick={() => setInboxTab('all')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'all'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-dark-muted hover:text-white hover:bg-dark-surface'
+              }`}
+            >
+              <span>All</span>
+              <span className="text-[10px] px-1 rounded-full bg-white/20">
+                {sortedVisibleConversations.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setInboxTab('new')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'new'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-dark-muted hover:text-white hover:bg-dark-surface'
+              }`}
+            >
+              <Sparkles className="w-3 h-3 text-blue-400" />
+              <span>New</span>
+              <span className="text-[10px] px-1 rounded-full bg-blue-500/20 text-blue-300">
+                {newChats.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setInboxTab('claimed')}
+              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'claimed'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-dark-muted hover:text-white hover:bg-dark-surface'
+              }`}
+            >
+              <UserCheck className="w-3 h-3 text-emerald-400" />
+              <span>Claimed</span>
+              <span className="text-[10px] px-1 rounded-full bg-emerald-500/20 text-emerald-300">
+                {claimedChats.length}
+              </span>
+            </button>
+          </div>
+
           <div className="flex-1 overflow-y-auto divide-y divide-dark-border/40">
             {sortedVisibleConversations.length === 0 ? (
               <div className="p-8 text-center text-xs text-dark-muted space-y-2">
@@ -655,115 +881,64 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 </p>
               </div>
             ) : (
-              sortedVisibleConversations.map((conv) => {
-                const isSelected = conv.id === selectedConv?.id;
-                const isConvMine = !!(
-                  (conv.assigned_agent_id && (
-                    conv.assigned_agent_id === currentAgent.id ||
-                    conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
-                  )) ||
-                  (conv.assigned_agent_name && (
-                    conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
-                  )) ||
-                  (conv.assigned_agent_email && (
-                    conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
-                  ))
-                );
-                const isConvClaimedOther = !!(conv.assigned_agent_id || conv.assigned_agent_name) && !isConvMine;
-                const isConvNeedsClaim = !isConvMine && !isConvClaimedOther && (conv.mode === 'human' || conv.status === 'pending_agent');
-
-                const flagSrc = getCountryFlagUrl(conv.visitor?.country_code || 'PK');
-                const lastMsg = conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
-                const unreadCount = getUnreadCountForConv(conv);
-                const isTyping = !!(conv.typing_preview && conv.typing_preview.trim().length > 0);
-
-                return (
-                  <div
-                    key={conv.id}
-                    onClick={() => {
-                      onSelectChat(conv.id);
-                      onMarkRead?.(conv.id);
-                    }}
-                    className={`p-3.5 cursor-pointer transition-all hover:bg-[#131d33] group relative ${
-                      isSelected ? 'bg-[#152038] border-l-4 border-brand-primary' : 'bg-transparent'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-2">
-                        <img
-                          src={flagSrc}
-                          alt="Flag"
-                          className="w-5 h-3.5 object-cover rounded shadow-sm flex-shrink-0"
-                          onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <h4 className="text-xs font-bold text-white flex items-center space-x-1 truncate">
-                            <span className="truncate">{conv.visitor_name}</span>
-                            {conv.visitor_email && (
-                              <span className="text-[10px] font-normal text-dark-muted truncate">({conv.visitor_email})</span>
-                            )}
-                          </h4>
-                          <p className="text-[11px] text-dark-muted truncate max-w-[170px] mt-0.5">
-                            {isTyping ? (
-                              <span className="text-brand-emerald italic font-medium">typing...</span>
-                            ) : lastMsg ? (
-                              lastMsg.sender_type === 'agent' ? (
-                                <span><span className="text-gray-400">You: </span>{lastMsg.content}</span>
-                              ) : (
-                                <span className={unreadCount > 0 ? 'text-white font-semibold' : 'text-dark-muted'}>{lastMsg.content}</span>
-                              )
-                            ) : (
-                              conv.visitor?.current_page || '/'
-                            )}
-                          </p>
+              <>
+                {/* 1. All Tab View with Section Dividers */}
+                {inboxTab === 'all' && (
+                  <>
+                    {newChats.length > 0 && (
+                      <div className="bg-[#0b1220]">
+                        <div className="px-3.5 py-1.5 bg-[#0e1628] border-b border-dark-border/60 flex items-center justify-between text-[10px] font-bold text-blue-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                          <div className="flex items-center space-x-1.5">
+                            <Sparkles className="w-3 h-3 text-blue-400" />
+                            <span>New Chats ({newChats.length})</span>
+                          </div>
+                          <span className="text-[9px] text-gray-400 font-normal lowercase">Awaiting / AI</span>
+                        </div>
+                        <div className="divide-y divide-dark-border/30">
+                          {newChats.map(renderConvItem)}
                         </div>
                       </div>
+                    )}
 
-                      <div className="flex items-center space-x-1.5 flex-shrink-0 ml-1">
-                        {unreadCount > 0 && (
-                          <span className="min-w-[18px] h-[18px] px-1.5 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center shadow-lg shadow-rose-500/40 animate-pulse flex-shrink-0">
-                            {unreadCount}
-                          </span>
-                        )}
-
-                        {isConvMine ? (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/30 flex items-center space-x-1">
-                            <Lock className="w-2.5 h-2.5" />
-                            <span>Claimed (You)</span>
-                          </span>
-                        ) : isConvClaimedOther ? (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-amber/15 text-brand-amber border border-brand-amber/30 flex items-center space-x-1">
-                            <Lock className="w-2.5 h-2.5" />
-                            <span>{conv.assigned_agent_name || 'Claimed'}</span>
-                          </span>
-                        ) : isConvNeedsClaim ? (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-rose/15 text-brand-rose border border-brand-rose/30 animate-pulse">
-                            NEEDS CLAIM
-                          </span>
-                        ) : (
-                          <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center space-x-1">
-                            <Bot className="w-2.5 h-2.5" />
-                            <span>AI Active</span>
-                          </span>
-                        )}
-
-                        {(isAdmin || isConvMine) && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteChat(conv.id);
-                            }}
-                            title="Delete Chat"
-                            className="p-1 rounded-lg text-dark-muted hover:text-rose-400 hover:bg-rose-500/15 transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                    {claimedChats.length > 0 && (
+                      <div className="bg-[#0b1220]">
+                        <div className="px-3.5 py-1.5 bg-[#0e1628] border-b border-dark-border/60 flex items-center justify-between text-[10px] font-bold text-emerald-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
+                          <div className="flex items-center space-x-1.5">
+                            <UserCheck className="w-3 h-3 text-emerald-400" />
+                            <span>Active & Claimed ({claimedChats.length})</span>
+                          </div>
+                          <span className="text-[9px] text-gray-400 font-normal lowercase">In Progress</span>
+                        </div>
+                        <div className="divide-y divide-dark-border/30">
+                          {claimedChats.map(renderConvItem)}
+                        </div>
                       </div>
+                    )}
+                  </>
+                )}
+
+                {/* 2. New Tab View */}
+                {inboxTab === 'new' && (
+                  newChats.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-dark-muted">No new unassigned chats</div>
+                  ) : (
+                    <div className="divide-y divide-dark-border/30">
+                      {newChats.map(renderConvItem)}
                     </div>
-                  </div>
-                );
-              })
+                  )
+                )}
+
+                {/* 3. Claimed Tab View */}
+                {inboxTab === 'claimed' && (
+                  claimedChats.length === 0 ? (
+                    <div className="p-8 text-center text-xs text-dark-muted">No claimed chats yet</div>
+                  ) : (
+                    <div className="divide-y divide-dark-border/30">
+                      {claimedChats.map(renderConvItem)}
+                    </div>
+                  )
+                )}
+              </>
             )}
           </div>
         </div>
@@ -843,6 +1018,20 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       <Lock className="w-3 h-3" />
                       <span>{selectedConv.assigned_agent_name}</span>
                     </span>
+                  )}
+
+                  {(isClaimedByMe || isAdmin) && (selectedConv.assigned_agent_name || selectedConv.mode === 'human') && (
+                    <button
+                      onClick={() => {
+                        setTransferModalOpen(true);
+                        setTransferError(null);
+                      }}
+                      title="Transfer Conversation to Another Agent / Admin"
+                      className="px-2.5 py-1 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3 h-3" />
+                      <span>Transfer</span>
+                    </button>
                   )}
 
                   {(isAdmin || isClaimedByMe) && (
@@ -1099,6 +1288,86 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         defaultEmail={currentAgent.email}
         visitorName={selectedConv?.visitor_name || 'Visitor'}
       />
+
+      {/* Transfer Chat Modal */}
+      {transferModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-[#0f172a] border border-dark-border rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-dark-border/60 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400">
+                  <ArrowRightLeft className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Transfer Conversation</h3>
+                  <p className="text-[11px] text-dark-muted">
+                    Reassign {selectedConv?.visitor_name || 'Visitor'} to another agent or admin
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setTransferModalOpen(false)}
+                className="text-dark-muted hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {transferError && (
+              <div className="p-2.5 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-xs">
+                {transferError}
+              </div>
+            )}
+
+            <form onSubmit={handleTransferChat} className="space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">
+                  Target Agent / Admin Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Garry Amelia (Admin) or Abdul Rafay"
+                  value={transferAgentName}
+                  onChange={(e) => setTransferAgentName(e.target.value)}
+                  className="w-full bg-[#131d33] border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-300 mb-1">
+                  Target Agent Email (Optional)
+                </label>
+                <input
+                  type="email"
+                  placeholder="e.g. garryamelia6265@gmail.com"
+                  value={transferAgentEmail}
+                  onChange={(e) => setTransferAgentEmail(e.target.value)}
+                  className="w-full bg-[#131d33] border border-dark-border rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div className="flex items-center space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setTransferModalOpen(false)}
+                  className="flex-1 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-bold transition-all cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={transferring || !transferAgentName.trim()}
+                  className="flex-1 py-2 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-lg disabled:opacity-50 flex items-center justify-center space-x-1.5 cursor-pointer"
+                >
+                  <ArrowRightLeft className="w-3.5 h-3.5" />
+                  <span>{transferring ? 'Transferring...' : 'Transfer Chat'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 };
