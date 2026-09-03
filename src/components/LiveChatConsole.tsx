@@ -122,38 +122,22 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
 
   // Calculate unread count for each conversation
   const getUnreadCountForConv = (conv: ChatSession) => {
+    // If this conversation is currently open on screen, it is seen!
     if (conv.id === selectedChatId) return 0;
-    
-    // 1. AI-only automated chats NEVER generate unread notification badges
-    const isNeedsHuman = conv.mode === 'human' || conv.status === 'pending_agent';
-    const isClaimed = !!(conv.assigned_agent_id || conv.assigned_agent_name);
-    if (!isNeedsHuman && !isClaimed) return 0;
 
     if (!conv.messages || conv.messages.length === 0) return 0;
 
-    // 2. If the latest message is from an agent, AI, or system, then the user has been answered -> 0 unread
-    const lastMsg = conv.messages[conv.messages.length - 1];
-    if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'ai' || lastMsg.sender_type === 'system')) {
-      return 0;
-    }
-
-    // 3. Find pending visitor messages after the last agent reply
-    let lastAgentIdx = -1;
-    for (let i = conv.messages.length - 1; i >= 0; i--) {
-      if (conv.messages[i].sender_type === 'agent') {
-        lastAgentIdx = i;
-        break;
-      }
-    }
-
-    const pendingVisitorMsgs = conv.messages.slice(lastAgentIdx + 1).filter(m => m.sender_type === 'visitor');
-    if (pendingVisitorMsgs.length === 0) return 0;
+    const visitorMsgs = conv.messages.filter(m => m.sender_type === 'visitor');
+    if (visitorMsgs.length === 0) return 0;
 
     const readVal = readConvMap?.[conv.id];
-    if (!readVal) return pendingVisitorMsgs.length;
+    if (!readVal) return visitorMsgs.length;
+
     const readTime = new Date(readVal).getTime();
     if (isNaN(readTime)) return 0;
-    return pendingVisitorMsgs.filter(m => new Date(m.created_at || 0).getTime() > readTime).length;
+
+    // Return the number of visitor messages sent AFTER the last read time
+    return visitorMsgs.filter(m => new Date(m.created_at || 0).getTime() > readTime).length;
   };
 
   const handleDeleteChat = async (id: string) => {

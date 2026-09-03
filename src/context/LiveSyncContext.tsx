@@ -139,52 +139,33 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const isAdm = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com';
 
     return convList.filter(c => {
-      // 1. AI-only chats (where no human has been requested or assigned) NEVER have unread count
-      const isNeedsHuman = c.mode === 'human' || c.status === 'pending_agent';
-      const isClaimed = !!(c.assigned_agent_id || c.assigned_agent_name);
-      if (!isNeedsHuman && !isClaimed) return false;
+      // For working agents: only consider chats they can access (claimed by them or pending human pickup)
+      if (!isAdm) {
+        const isMine = !!(
+          (c.assigned_agent_id && c.assigned_agent_id === currentUser?.id) ||
+          (c.assigned_agent_name && c.assigned_agent_name.toLowerCase() === currentUser?.full_name?.toLowerCase()) ||
+          (c.assigned_agent_email && c.assigned_agent_email.toLowerCase() === currentUser?.email?.toLowerCase())
+        );
+        const isNeedsHuman = !c.assigned_agent_id && !c.assigned_agent_name && (c.mode === 'human' || c.status === 'pending_agent');
+        if (!isMine && !isNeedsHuman) return false;
+      }
 
-      // 2. Must have messages
       if (!c.messages || c.messages.length === 0) return false;
+      const visitorMsgs = c.messages.filter(m => m.sender_type === 'visitor');
+      if (visitorMsgs.length === 0) return false;
 
-      // 3. If the latest message is from an agent, AI, or system, then the user has been answered -> not unread
-      const lastMsg = c.messages[c.messages.length - 1];
-      if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'ai' || lastMsg.sender_type === 'system')) {
-        return false;
-      }
+      const lastVisitorMsg = visitorMsgs[visitorMsgs.length - 1];
+      const lastVisitorTime = new Date(lastVisitorMsg.created_at || 0).getTime();
 
-      // 4. Find pending visitor messages after the last agent reply
-      let lastAgentIdx = -1;
-      for (let i = c.messages.length - 1; i >= 0; i--) {
-        if (c.messages[i].sender_type === 'agent') {
-          lastAgentIdx = i;
-          break;
-        }
-      }
-
-      const pendingVisitorMsgs = c.messages.slice(lastAgentIdx + 1).filter(m => m.sender_type === 'visitor');
-      if (pendingVisitorMsgs.length === 0) return false;
-      const lastVisitorMsg = pendingVisitorMsgs[pendingVisitorMsgs.length - 1];
-
-      // 5. If marked read by ID or read timestamp is >= message timestamp
+      // If marked read by ID or read timestamp is >= last visitor message timestamp
       const readVal = readMap[c.id];
       if (readVal) {
         if (readVal === lastVisitorMsg.id) return false;
         const readTime = new Date(readVal).getTime();
-        const msgTime = new Date(lastVisitorMsg.created_at || 0).getTime();
-        if (!isNaN(readTime) && readTime >= msgTime) return false;
+        if (!isNaN(readTime) && readTime >= lastVisitorTime) return false;
       }
 
-      // 6. Admin sees whatever unread chats exist for agents (needs human or claimed)
-      if (isAdm) return true;
-
-      // 7. Regular agent sees their claimed chats OR chats waiting for pickup
-      const isMine = !!(
-        (c.assigned_agent_id && c.assigned_agent_id === currentUser?.id) ||
-        (c.assigned_agent_name && c.assigned_agent_name.toLowerCase() === currentUser?.full_name?.toLowerCase()) ||
-        (c.assigned_agent_email && c.assigned_agent_email.toLowerCase() === currentUser?.email?.toLowerCase())
-      );
-      return isMine || isNeedsHuman;
+      return true;
     }).length;
   }, []);
 
