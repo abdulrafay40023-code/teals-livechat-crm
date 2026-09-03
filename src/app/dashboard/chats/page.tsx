@@ -20,21 +20,34 @@ export default function ChatsPage() {
     return { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' };
   });
 
-  const { conversations, refreshSync, resetUnreadCount, markConversationAsRead } = useLiveSync();
+  const getSelectedKey = (email?: string) => {
+    const clean = (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+    return clean ? `teals_selected_chat_${clean}` : 'teals_selected_chat_id';
+  };
+
   const [selectedChatId, setSelectedChatId] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('teals_selected_chat_id') || null;
+        const raw = localStorage.getItem('teals_agent_session');
+        const email = raw ? JSON.parse(raw)?.email : '';
+        const key = (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+        return localStorage.getItem(key ? `teals_selected_chat_${key}` : 'teals_selected_chat_id') || null;
       } catch {}
     }
     return null;
   });
 
+  const { conversations, refreshSync, markConversationAsRead } = useLiveSync();
+
   useEffect(() => {
     const rawSession = localStorage.getItem('teals_agent_session');
     if (rawSession) {
       try {
-        setCurrentAgent(JSON.parse(rawSession));
+        const parsed = JSON.parse(rawSession);
+        setCurrentAgent(parsed);
+        const key = getSelectedKey(parsed.email);
+        const saved = localStorage.getItem(key);
+        if (saved) setSelectedChatId(saved);
       } catch {}
     }
   }, []);
@@ -56,11 +69,12 @@ export default function ChatsPage() {
         conversations={conversations as unknown as ChatSession[]}
         onSelectChat={(id) => {
           setSelectedChatId(id || null);
+          const key = getSelectedKey(currentAgent?.email);
           if (id) {
-            try { localStorage.setItem('teals_selected_chat_id', id); } catch {}
+            try { localStorage.setItem(key, id); } catch {}
             markConversationAsRead(id);
           } else {
-            try { localStorage.removeItem('teals_selected_chat_id'); } catch {}
+            try { localStorage.removeItem(key); } catch {}
           }
         }}
         onClaimSuccess={handleClaimSuccess}

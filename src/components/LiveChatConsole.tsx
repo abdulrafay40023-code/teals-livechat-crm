@@ -84,33 +84,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
 
   const { readConvMap, deleteConversation } = useLiveSync();
 
-  const visibleConversations = conversations.filter((conv) => {
-    // 1. ADMIN: Sees EVERYTHING (AI chats, unclaimed human requests, claimed chats)
-    if (isAdmin) return true;
-
-    // 2. REGULAR AGENT:
-    // a) Chats they personally claimed:
-    const isMine = !!(
-      (conv.assigned_agent_id && (
-        conv.assigned_agent_id === currentAgent.id ||
-        conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
-      )) ||
-      (conv.assigned_agent_name && (
-        conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
-      )) ||
-      (conv.assigned_agent_email && (
-        conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
-      ))
-    );
-    if (isMine) return true;
-
-    // b) Unclaimed chats that explicitly need human assistance:
-    const isNeedsHuman = !conv.assigned_agent_id && !conv.assigned_agent_name && (conv.mode === 'human' || conv.status === 'pending_agent');
-    if (isNeedsHuman) return true;
-
-    // c) Regular agents DO NOT see AI-only conversations!
-    return false;
-  });
+  // All conversations are visible to both Admin and Agents with appropriate action tags
+  const visibleConversations = conversations;
 
   // Sort visible conversations so the one with the latest message is ALWAYS at the very top (WhatsApp style)
   const sortedVisibleConversations = [...visibleConversations].sort((a, b) => {
@@ -335,14 +310,22 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
+  // Auto-select latest active conversation if none selected
+  useEffect(() => {
+    if ((!selectedChatId || !conversations.some(c => c.id === selectedChatId)) && sortedVisibleConversations.length > 0) {
+      onSelectChat(sortedVisibleConversations[0].id);
+    }
+  }, [selectedChatId, conversations.length, sortedVisibleConversations.length]);
+
   const prevConvIdRef = useRef<string | null>(null);
 
   // Synchronize messages immediately when selectedConv updates in parent conversations list
   useEffect(() => {
     if (!selectedConv?.id) {
-      prevConvIdRef.current = null;
-      setMessages([]);
-      setLiveTypingPreview(null);
+      if (prevConvIdRef.current !== null) {
+        setMessages([]);
+        setLiveTypingPreview(null);
+      }
       return;
     }
 

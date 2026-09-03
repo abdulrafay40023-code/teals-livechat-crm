@@ -263,15 +263,21 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const convsList: LiveConversation[] = Array.isArray(data.conversations) ? data.conversations : [];
       // NON-DESTRUCTIVE UNION MERGE: never let a background sync poll erase newer messages received via WebSockets
       setConversations(prev => {
-        const prevMap = new Map(prev.map(c => [c.id, c]));
+        const map = new Map<string, LiveConversation>();
+        // 1. Keep all existing conversations in prev
+        prev.forEach(c => map.set(c.id, c));
 
-        const mergedList = convsList.map(apiConv => {
-          const prevConv = prevMap.get(apiConv.id);
-          if (!prevConv) return apiConv;
+        // 2. Merge server conversations into map
+        convsList.forEach(apiConv => {
+          const prevConv = map.get(apiConv.id);
+          if (!prevConv) {
+            map.set(apiConv.id, apiConv);
+            return;
+          }
 
           const msgMap = new Map<string, LiveMessage>();
-          (apiConv.messages || []).forEach(m => msgMap.set(m.id, m));
           (prevConv.messages || []).forEach(m => msgMap.set(m.id, m));
+          (apiConv.messages || []).forEach(m => msgMap.set(m.id, m));
 
           const mergedMessages = Array.from(msgMap.values()).sort((a, b) => {
             if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
@@ -292,7 +298,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ? 'active'
             : (apiConv.status === 'pending_agent' || prevConv.status === 'pending_agent' ? 'pending_agent' : 'active');
 
-          const merged: LiveConversation = {
+          map.set(apiConv.id, {
             ...prevConv,
             ...apiConv,
             visitor_name: apiConv.visitor_name || prevConv.visitor_name,
@@ -303,10 +309,10 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             assigned_agent_name: effectiveAssignedName,
             assigned_agent_email: effectiveAssignedEmail,
             messages: mergedMessages
-          };
-          return merged;
+          });
         });
 
+        const mergedList = Array.from(map.values());
         setChatCount(mergedList.length);
         return mergedList;
       });
