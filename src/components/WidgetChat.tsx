@@ -383,8 +383,16 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         const systemMessage = (raw as Record<string, unknown>)?.systemMessage as { id: string; sender_type: string; sender_name: string; content: string; seq?: number; created_at?: string };
         const conv = (raw as Record<string, unknown>)?.conversation as { id?: string; visitor_id?: string; mode?: string; assigned_agent_name?: string };
 
-        const matches = !cId || cId === conversationId || cId === visitorToken || (conv && (conv.id === conversationId || conv.visitor_id === visitorToken));
-        if (matches) {
+        // Update last message in conversation list
+        if (cId && message?.content) {
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setSavedConversations(prev => {
+            return prev.map(c => c.id === cId ? { ...c, lastMessage: message.content, updatedAt: timeStr } : c);
+          });
+        }
+
+        const isExactMatch = cId === conversationId || (conv && conv.id === conversationId);
+        if (isExactMatch) {
           // Immediately dismiss agent typing bubble when a message arrives from agent
           if (message?.sender_type === 'agent' || message?.sender_type === 'ai') {
             setAgentTypingText(null);
@@ -612,8 +620,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   // Switch to a previous conversation
   const handleSelectOldChat = async (convId: string) => {
-    // If currently on a conversation, save its cache
-    if (conversationId && messages.length > 0) {
+    // If currently on a conversation with real messages, save its cache
+    if (conversationId && messages.length > 1) {
       try {
         localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
       } catch {}
@@ -653,20 +661,22 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   };
 
   // Start a brand new conversation and preserve old ones
-  const handleStartNewChat = () => {
-    // 1. Save current conversation to history list
+  const handleStartNewChat = async () => {
+    // 1. Snapshot current conversation to history list & cache
     let currentList = [...savedConversations];
     if (conversationId) {
       const lastMsg = messages.length > 1 ? (messages[messages.length - 1]?.content || 'Chat Session') : DEFAULT_GREETING;
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const currentEntry: SavedConvSummary = { id: conversationId, lastMessage: lastMsg, updatedAt: timeStr };
       currentList = [currentEntry, ...currentList.filter(c => c.id !== conversationId)];
-      try {
-        localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
-      } catch {}
+      if (messages.length > 1) {
+        try {
+          localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
+        } catch {}
+      }
     }
 
-    // 2. Generate new conversation ID
+    // 2. Generate new unique conversation ID
     const newConvId = 'conv_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
     setConversationId(newConvId);
     try {
@@ -700,6 +710,26 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     setMessages([initGreet]);
     try {
       localStorage.setItem('teals_conv_cache_' + newConvId, JSON.stringify([initGreet]));
+    } catch {}
+
+    // 3. Immediately register new conversation on server so it is permanent across reloads and syncs
+    try {
+      const cleanEmail = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('teals_lead_email') || '' : '');
+      const cleanName = userName || (typeof window !== 'undefined' ? localStorage.getItem('teals_lead_name') || '' : '');
+      await fetch('/api/chat/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: 'init_' + newConvId,
+          conversationId: newConvId,
+          visitorToken: visitorToken || newConvId,
+          senderType: 'system',
+          senderName: 'System',
+          senderEmail: cleanEmail || undefined,
+          content: 'Chat session started'
+        })
+      });
+      fetchVisitorConversations(visitorToken || newConvId, cleanEmail || undefined);
     } catch {}
   };
 
