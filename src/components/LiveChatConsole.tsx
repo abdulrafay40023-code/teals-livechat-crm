@@ -66,7 +66,7 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   onClaimSuccess,
   onMarkRead,
 }) => {
-  const [messages, setMessages] = useState<Array<{ id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; status?: 'sent' | 'delivered' | 'read'; created_at: string }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; conversation_id?: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; status?: 'sent' | 'delivered' | 'read'; created_at: string }>>([]);
   const [inputText, setInputText] = useState('');
   const [isWhisperMode, setIsWhisperMode] = useState(false);
   const [sending, setSending] = useState(false);
@@ -131,32 +131,22 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     if (visitorMsgs.length === 0) return 0;
 
     const lastVisitorMsg = visitorMsgs[visitorMsgs.length - 1];
-    const lastVisitorTime = new Date(lastVisitorMsg.created_at || 0).getTime();
-
     const readVal = readConvMap?.[conv.id];
     if (!readVal) return visitorMsgs.length;
 
-    let savedId = '';
-    let readTime = 0;
-
-    if (typeof readVal === 'string' && readVal.includes('__')) {
-      const [mId, rTime] = readVal.split('__');
-      savedId = mId;
-      readTime = Number(rTime);
-    } else if (typeof readVal === 'string') {
-      savedId = readVal;
-      readTime = new Date(readVal).getTime();
+    let savedId = readVal;
+    if (readVal.includes('__')) {
+      savedId = readVal.split('__')[0];
     }
 
-    if (savedId && (savedId === lastVisitorMsg.id || savedId === 'all')) return 0;
-    if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return 0;
+    if (savedId === lastVisitorMsg.id || savedId === 'all') return 0;
 
-    // Return the number of visitor messages sent AFTER the last read time
-    return visitorMsgs.filter(m => {
-      if (savedId && m.id === savedId) return false;
-      const mTime = new Date(m.created_at || 0).getTime();
-      return mTime > (readTime + 120000);
-    }).length;
+    // Count visitor messages sent after the last seen visitor message
+    const lastSeenIdx = visitorMsgs.findIndex(m => m.id === savedId);
+    if (lastSeenIdx >= 0) {
+      return visitorMsgs.length - (lastSeenIdx + 1);
+    }
+    return visitorMsgs.length;
   };
 
   const handleDeleteChat = async (id: string) => {
@@ -300,14 +290,23 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       onMarkRead?.(targetId);
     }
 
-    // Scoped message load strictly for targetId (never merge stale messages from other chats)
+    // Scoped message load strictly for targetId (never wipe optimistic or newer messages)
     const fetchMsgs = async () => {
       try {
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
           if (data.messages && Array.isArray(data.messages) && targetId === selectedConv?.id) {
-            setMessages(sortTimelineMessages(data.messages));
+            setMessages(prev => {
+              const map = new Map<string, any>();
+              prev.forEach(m => {
+                if (!m.conversation_id || m.conversation_id === targetId) {
+                  map.set(m.id, m);
+                }
+              });
+              data.messages.forEach((m: any) => map.set(m.id, m));
+              return sortTimelineMessages(Array.from(map.values()));
+            });
           }
         }
       } catch {}
@@ -323,9 +322,12 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
+  const prevConvIdRef = useRef<string | null>(null);
+
   // Synchronize messages immediately when selectedConv updates in parent conversations list
   useEffect(() => {
     if (!selectedConv?.id) {
+      prevConvIdRef.current = null;
       setMessages([]);
       setLiveTypingPreview(null);
       return;
@@ -333,14 +335,27 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
     onMarkRead?.(selectedConv.id);
 
-    if (selectedConv.messages && Array.isArray(selectedConv.messages)) {
-      setMessages(sortTimelineMessages(selectedConv.messages));
-      const last = selectedConv.messages[selectedConv.messages.length - 1];
-      if (last && last.sender_type === 'visitor') {
-        setLiveTypingPreview(null);
-      }
+    const isNewConv = prevConvIdRef.current !== selectedConv.id;
+    prevConvIdRef.current = selectedConv.id;
+
+    if (isNewConv) {
+      setMessages(sortTimelineMessages(selectedConv.messages || []));
     } else {
-      setMessages([]);
+      setMessages(prev => {
+        const map = new Map<string, any>();
+        prev.forEach(m => {
+          if (!m.conversation_id || m.conversation_id === selectedConv.id) {
+            map.set(m.id, m);
+          }
+        });
+        (selectedConv.messages || []).forEach(m => map.set(m.id, m));
+        return sortTimelineMessages(Array.from(map.values()));
+      });
+    }
+
+    const last = selectedConv.messages?.[selectedConv.messages.length - 1];
+    if (last && last.sender_type === 'visitor') {
+      setLiveTypingPreview(null);
     }
   }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at, onMarkRead]);
 

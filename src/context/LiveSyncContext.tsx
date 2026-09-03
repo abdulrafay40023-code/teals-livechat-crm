@@ -155,21 +155,16 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (visitorMsgs.length === 0) return false;
 
       const lastVisitorMsg = visitorMsgs[visitorMsgs.length - 1];
-      const lastVisitorTime = new Date(lastVisitorMsg.created_at || 0).getTime();
 
-      // If marked read by ID or read timestamp is >= last visitor message timestamp
+      // Pure ID-based unread matching (zero clock dependency)
       const readVal = readMap[c.id];
       if (readVal) {
-        if (typeof readVal === 'string' && readVal.includes('__')) {
-          const [savedMsgId, readTimeStr] = readVal.split('__');
-          if (savedMsgId && (savedMsgId === lastVisitorMsg.id || savedMsgId === 'all')) return false;
-          const readTime = Number(readTimeStr);
-          if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return false;
-        } else {
-          const savedId = typeof readVal === 'string' ? readVal : (readVal as any)?.msgId;
-          if (savedId && (savedId === lastVisitorMsg.id || savedId === 'all')) return false;
-          const readTime = typeof readVal === 'string' ? new Date(readVal).getTime() : (readVal as any)?.readAt;
-          if (!isNaN(readTime) && (readTime + 120000) >= lastVisitorTime) return false;
+        let savedId = readVal;
+        if (readVal.includes('__')) {
+          savedId = readVal.split('__')[0];
+        }
+        if (savedId === lastVisitorMsg.id || savedId === 'all') {
+          return false;
         }
       }
 
@@ -188,10 +183,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const vMsgs = (conv?.messages || []).filter(m => m.sender_type === 'visitor');
       const lastMsgId = vMsgs.length > 0 ? vMsgs[vMsgs.length - 1].id : 'all';
 
-      // Store composite string: msgId__futureTimestamp (100% type-safe string and clock skew proof)
-      const readEntry = `${lastMsgId}__${Date.now() + 300000}`;
-
-      const next = { ...rMap, [convId]: readEntry };
+      // Store exact last seen message ID
+      const next = { ...rMap, [convId]: lastMsgId };
       if (typeof window !== 'undefined') {
         try {
           const storageKey = getUserStorageKey();

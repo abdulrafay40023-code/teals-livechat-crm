@@ -193,12 +193,15 @@ class GranularStore {
   async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
     this.sessionCache.set(session.id, session);
     
-    // Background cloud storage upload (non-blocking)
     const key = `sessions/${sanitizeKey(session.id)}.json`;
-    supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
-      upsert: true,
-      contentType: 'application/json'
-    }).catch(e => console.error('Cloud save session error:', e));
+    try {
+      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
+        upsert: true,
+        contentType: 'application/json'
+      });
+    } catch (e) {
+      console.error('Cloud save session error:', e);
+    }
 
     return session;
   }
@@ -206,12 +209,13 @@ class GranularStore {
   async removeSession(sessionId: string): Promise<void> {
     this.sessionCache.delete(sessionId);
     const key = `sessions/${sanitizeKey(sessionId)}.json`;
-    supabaseAdmin.storage.from(BUCKET).remove([key]).catch(() => {});
+    try {
+      await supabaseAdmin.storage.from(BUCKET).remove([key]);
+    } catch {}
   }
 
   async getConversation(convId: string): Promise<StoreConversation | null> {
-    const cached = this.convCache.get(convId);
-    if (cached) return cached;
+    let conv = this.convCache.get(convId) || null;
 
     try {
       const key = `conversations/${sanitizeKey(convId)}.json`;
@@ -220,13 +224,21 @@ class GranularStore {
         const text = await parseStorageData(data);
         if (text) {
           const cloudConv: StoreConversation = JSON.parse(text);
-          cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
+          if (conv) {
+            const msgMap = new Map<string, StoreMessage>();
+            (conv.messages || []).forEach(m => msgMap.set(m.id, m));
+            (cloudConv.messages || []).forEach(m => msgMap.set(m.id, m));
+            cloudConv.messages = sortMessagesChronologically(Array.from(msgMap.values()));
+          } else {
+            cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
+          }
           this.convCache.set(convId, cloudConv);
           return cloudConv;
         }
       }
     } catch {}
-    return null;
+
+    return conv;
   }
 
   async getConversationsByVisitor(visitorToken: string, email?: string): Promise<StoreConversation[]> {
@@ -268,12 +280,16 @@ class GranularStore {
     // 0ms instant in-memory update
     this.convCache.set(conv.id, mergedConv);
 
-    // Non-blocking background upload to Supabase Storage
+    // Persist to Supabase Storage
     const key = `conversations/${sanitizeKey(conv.id)}.json`;
-    supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
-      upsert: true,
-      contentType: 'application/json'
-    }).catch(e => console.error('Cloud save conversation error:', e));
+    try {
+      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
+        upsert: true,
+        contentType: 'application/json'
+      });
+    } catch (e) {
+      console.error('Cloud save conversation error:', e);
+    }
 
     return mergedConv;
   }
@@ -295,15 +311,23 @@ class GranularStore {
         await Promise.all(cFiles.map(async (f) => {
           try {
             const id = f.name.replace('.json', '');
-            if (!this.convCache.has(id)) {
-              const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
-              if (data) {
-                const text = await parseStorageData(data);
-                if (text) {
-                  const c: StoreConversation = JSON.parse(text);
+            const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
+            if (data) {
+              const text = await parseStorageData(data);
+              if (text) {
+                const c: StoreConversation = JSON.parse(text);
+                const existing = this.convCache.get(c.id) || this.convCache.get(id);
+                if (existing) {
+                  const msgMap = new Map<string, StoreMessage>();
+                  (existing.messages || []).forEach(m => msgMap.set(m.id, m));
+                  (c.messages || []).forEach(m => msgMap.set(m.id, m));
+                  c.messages = sortMessagesChronologically(Array.from(msgMap.values()));
+                  c.assigned_agent_id = c.assigned_agent_id || existing.assigned_agent_id;
+                  c.assigned_agent_name = c.assigned_agent_name || existing.assigned_agent_name;
+                } else {
                   c.messages = sortMessagesChronologically(c.messages || []);
-                  this.convCache.set(c.id, c);
                 }
+                this.convCache.set(c.id, c);
               }
             }
           } catch {}
