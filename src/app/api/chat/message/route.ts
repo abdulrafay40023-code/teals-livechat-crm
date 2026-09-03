@@ -50,7 +50,9 @@ export async function POST(req: NextRequest) {
       senderName,
       senderEmail,
       content,
-      isWhisper = false
+      isWhisper = false,
+      isHumanConnected = false,
+      assignedAgentName
     } = await req.json();
 
     if (!content || !senderType) {
@@ -73,6 +75,12 @@ export async function POST(req: NextRequest) {
     let conv = await granularStore.getConversation(convId);
     const now = new Date().toISOString();
 
+    // STRICT HUMAN CONVERSATION CHECK: If claimed, has agent, or agent ever replied, it is 100% HUMAN!
+    const hasAgentAssigned = !!(conv?.assigned_agent_id || conv?.assigned_agent_name || assignedAgentName);
+    const hasAgentMessages = (conv?.messages || []).some(m => m.sender_type === 'agent');
+    const hasClaimSystemMsg = (conv?.messages || []).some(m => m.sender_type === 'system' && m.content.includes('claimed and joined'));
+    const isHumanMode = conv?.mode === 'human' || isHumanConnected || hasAgentAssigned || hasAgentMessages || hasClaimSystemMsg;
+
     if (!conv) {
       conv = {
         id: convId,
@@ -80,8 +88,9 @@ export async function POST(req: NextRequest) {
         visitor_id: visitorToken || convId,
         visitor_name: senderName || 'Visitor',
         visitor_email: senderEmail || undefined,
-        mode: 'ai',
-        status: 'active',
+        mode: isHumanMode ? 'human' : 'ai',
+        status: isHumanMode ? (hasAgentAssigned ? 'active' : 'pending_agent') : 'active',
+        assigned_agent_name: assignedAgentName || undefined,
         created_at: now,
         updated_at: now,
         messages: [
@@ -98,6 +107,11 @@ export async function POST(req: NextRequest) {
         ]
       };
     } else {
+      if (isHumanMode) {
+        conv.mode = 'human';
+        if (assignedAgentName && !conv.assigned_agent_name) conv.assigned_agent_name = assignedAgentName;
+        if (!conv.status) conv.status = hasAgentAssigned ? 'active' : 'pending_agent';
+      }
       if (senderType === 'visitor') {
         if (senderName && senderName !== 'Visitor' && senderName !== 'You') conv.visitor_name = senderName;
         if (senderEmail) conv.visitor_email = senderEmail;
@@ -126,11 +140,11 @@ export async function POST(req: NextRequest) {
     conv.updated_at = now;
     conv.typing_preview = '';
 
-    const isAlreadyHandledByHuman = conv.mode === 'human' && (!!conv.assigned_agent_id || !!conv.assigned_agent_name);
+    const isAlreadyHandledByHuman = isHumanMode && hasAgentAssigned;
     const humanRequested = senderType === 'visitor' && isHumanHandoffRequested(content) && !isAlreadyHandledByHuman;
 
     // CASE 1: Visitor requested fresh human handoff (AI -> Human transition)
-    if (humanRequested) {
+    if (humanRequested && !hasAgentAssigned) {
       console.log('[CHAT_DEBUG] Visitor explicitly requested human handoff:', content);
       conv.mode = 'human';
       conv.status = 'pending_agent';
@@ -173,8 +187,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // CASE 2: AI Mode with Visitor message (Immediate visitor broadcast, background AI)
-    if (conv.mode === 'ai' && senderType === 'visitor') {
+    // CASE 2: AI Mode with Visitor message - STRICTLY ONLY IF NO HUMAN AGENT IS INVOLVED!
+    const isStrictlyAi = conv.mode === 'ai' && !isHumanMode && !hasAgentAssigned && !hasAgentMessages && !hasClaimSystemMsg && conv.status !== 'pending_agent';
+
+    if (isStrictlyAi && senderType === 'visitor') {
       conv.last_visitor_message_at = now;
 
       // 1. Broadcast visitor message instantly in parallel with storage

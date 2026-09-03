@@ -785,7 +785,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           senderType: 'visitor',
           senderName: userName || 'Visitor',
           senderEmail: userEmail || undefined,
-          content: userText
+          content: userText,
+          isHumanConnected,
+          assignedAgentName: agentName || undefined
         })
       });
 

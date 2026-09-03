@@ -224,16 +224,31 @@ class GranularStore {
         const text = await parseStorageData(data);
         if (text) {
           const cloudConv: StoreConversation = JSON.parse(text);
+          const isHuman = conv?.mode === 'human' || cloudConv.mode === 'human' || !!conv?.assigned_agent_id || !!cloudConv.assigned_agent_id || !!conv?.assigned_agent_name || !!cloudConv.assigned_agent_name;
+          const assignedId = conv?.assigned_agent_id || cloudConv.assigned_agent_id;
+          const assignedName = conv?.assigned_agent_name || cloudConv.assigned_agent_name;
+          const assignedEmail = conv?.assigned_agent_email || cloudConv.assigned_agent_email;
+          const status = isHuman && assignedId ? 'active' : (conv?.status === 'pending_agent' || cloudConv.status === 'pending_agent' ? 'pending_agent' : (conv?.status || cloudConv.status || 'active'));
+
+          const merged: StoreConversation = {
+            ...cloudConv,
+            ...(conv || {}),
+            mode: isHuman ? 'human' : 'ai',
+            status,
+            assigned_agent_id: assignedId,
+            assigned_agent_name: assignedName,
+            assigned_agent_email: assignedEmail,
+          };
           if (conv) {
             const msgMap = new Map<string, StoreMessage>();
-            (conv.messages || []).forEach(m => msgMap.set(m.id, m));
             (cloudConv.messages || []).forEach(m => msgMap.set(m.id, m));
-            cloudConv.messages = sortMessagesChronologically(Array.from(msgMap.values()));
+            (conv.messages || []).forEach(m => msgMap.set(m.id, m));
+            merged.messages = sortMessagesChronologically(Array.from(msgMap.values()));
           } else {
-            cloudConv.messages = sortMessagesChronologically(cloudConv.messages || []);
+            merged.messages = sortMessagesChronologically(cloudConv.messages || []);
           }
-          this.convCache.set(convId, cloudConv);
-          return cloudConv;
+          this.convCache.set(convId, merged);
+          return merged;
         }
       }
     } catch {}
