@@ -91,9 +91,16 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     // 2. REGULAR AGENT:
     // a) Chats they personally claimed:
     const isMine = !!(
-      (conv.assigned_agent_id && conv.assigned_agent_id === currentAgent.id) ||
-      (conv.assigned_agent_name && conv.assigned_agent_name.toLowerCase() === currentAgent.full_name?.toLowerCase()) ||
-      (conv.assigned_agent_email && conv.assigned_agent_email.toLowerCase() === currentAgent.email?.toLowerCase())
+      (conv.assigned_agent_id && (
+        conv.assigned_agent_id === currentAgent.id ||
+        conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+      )) ||
+      (conv.assigned_agent_name && (
+        conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+      )) ||
+      (conv.assigned_agent_email && (
+        conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+      ))
     );
     if (isMine) return true;
 
@@ -162,9 +169,16 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const selectedConv = selectedChatId ? (conversations.find((c) => c.id === selectedChatId) || null) : null;
 
   const isClaimedByMe = !!(
-    (selectedConv?.assigned_agent_id && selectedConv?.assigned_agent_id === currentAgent.id) ||
-    (selectedConv?.assigned_agent_name && selectedConv?.assigned_agent_name.toLowerCase() === currentAgent.full_name?.toLowerCase()) ||
-    (selectedConv?.assigned_agent_email && selectedConv?.assigned_agent_email.toLowerCase() === currentAgent.email?.toLowerCase())
+    (selectedConv?.assigned_agent_id && (
+      selectedConv.assigned_agent_id === currentAgent.id ||
+      selectedConv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+    )) ||
+    (selectedConv?.assigned_agent_name && (
+      selectedConv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+    )) ||
+    (selectedConv?.assigned_agent_email && (
+      selectedConv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+    ))
   );
   const isClaimedByOther = !!(selectedConv?.assigned_agent_id || selectedConv?.assigned_agent_name) && !isClaimedByMe;
   const isNeedsClaim = !isClaimedByMe && !isClaimedByOther && (selectedConv?.mode === 'human' || selectedConv?.status === 'pending_agent');
@@ -621,9 +635,16 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
               sortedVisibleConversations.map((conv) => {
                 const isSelected = conv.id === selectedConv?.id;
                 const isConvMine = !!(
-                  (conv.assigned_agent_id && conv.assigned_agent_id === currentAgent.id) ||
-                  (conv.assigned_agent_name && conv.assigned_agent_name.toLowerCase() === currentAgent.full_name?.toLowerCase()) ||
-                  (conv.assigned_agent_email && conv.assigned_agent_email.toLowerCase() === currentAgent.email?.toLowerCase())
+                  (conv.assigned_agent_id && (
+                    conv.assigned_agent_id === currentAgent.id ||
+                    conv.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+                  )) ||
+                  (conv.assigned_agent_name && (
+                    conv.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+                  )) ||
+                  (conv.assigned_agent_email && (
+                    conv.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+                  ))
                 );
                 const isConvClaimedOther = !!(conv.assigned_agent_id || conv.assigned_agent_name) && !isConvMine;
                 const isConvNeedsClaim = !isConvMine && !isConvClaimedOther && (conv.mode === 'human' || conv.status === 'pending_agent');
@@ -766,9 +787,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 <div className="flex items-center space-x-2">
                   {isNeedsClaim ? (
                     <button
-                      onClick={() => setClaimModalOpen(true)}
+                      onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
                       disabled={claiming}
-                      className="px-3.5 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold shadow-lg transition-all flex items-center space-x-1.5 animate-bounce disabled:opacity-50"
+                      className="px-3.5 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold shadow-lg transition-all flex items-center space-x-1.5 animate-bounce disabled:opacity-50 cursor-pointer"
                     >
                       <UserPlus className="w-3.5 h-3.5" />
                       <span>{claiming ? 'Claiming...' : 'Claim Chat'}</span>
@@ -781,9 +802,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       </span>
                     ) : (
                       <button
-                        onClick={() => setClaimModalOpen(true)}
+                        onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
                         disabled={claiming}
-                        className="px-3 py-1 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-bold transition-all flex items-center space-x-1.5 disabled:opacity-50"
+                        className="px-3 py-1 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-bold transition-all flex items-center space-x-1.5 disabled:opacity-50 cursor-pointer"
                       >
                         <UserPlus className="w-3.5 h-3.5" />
                         <span>{claiming ? 'Claiming...' : 'Take Over'}</span>
@@ -822,45 +843,12 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 </div>
               )}
 
-              {/* View Rendering: Locked Screen vs Active Message Stream */}
-              {isNeedsClaim && !isAdmin ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-[#0a0f1d] space-y-5 select-none">
-                  <div className="w-20 h-20 rounded-3xl bg-brand-rose/15 border border-brand-rose/30 flex items-center justify-center text-brand-rose animate-pulse shadow-2xl shadow-brand-rose/25">
-                    <Lock className="w-10 h-10" />
-                  </div>
-                  <div className="space-y-2 max-w-md">
-                    <h3 className="text-lg font-bold text-white tracking-tight">Human Support Requested</h3>
-                    <p className="text-xs text-dark-muted leading-relaxed">
-                      The customer requested to speak with a real person. Claim this conversation to verify your details, view the message history, and start chatting.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setClaimModalOpen(true)}
-                    disabled={claiming}
-                    className="px-8 py-3.5 rounded-2xl bg-brand-rose hover:bg-rose-600 text-white text-sm font-bold shadow-xl shadow-brand-rose/30 transition-all flex items-center space-x-2.5 cursor-pointer transform hover:scale-105 active:scale-95 disabled:opacity-50"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                    <span>{claiming ? 'Claiming Chat...' : 'Claim Chat Now'}</span>
-                  </button>
-                </div>
-              ) : isClaimedByOther && !isAdmin ? (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-dark-muted space-y-3 bg-[#0a0f1d]/50">
-                  <div className="w-12 h-12 rounded-2xl bg-dark-card border border-dark-border flex items-center justify-center text-dark-muted">
-                    <Lock className="w-6 h-6 text-brand-amber" />
-                  </div>
-                  <h4 className="text-sm font-bold text-white">Conversation in Progress</h4>
-                  <p className="text-xs text-dark-muted max-w-xs leading-relaxed">
-                    This conversation is assigned to <span className="text-brand-amber font-semibold">{selectedConv.assigned_agent_name}</span>.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  {/* Message Stream */}
-                  <div
-                    ref={chatContainerRef}
-                    onScroll={handleChatScroll}
-                    className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
-                  >
+              {/* Message Stream (ALWAYS visible, never locked out) */}
+              <div
+                ref={chatContainerRef}
+                onScroll={handleChatScroll}
+                className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3"
+              >
                     {messages.map((m) => {
                       const isVisitor = m.sender_type === 'visitor';
                       const isSystem = m.sender_type === 'system';
@@ -933,6 +921,29 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                     </div>
                   )}
 
+                  {isNeedsClaim && !isAdmin && (
+                    <div className="px-4 py-2.5 bg-brand-rose/15 border-t border-brand-rose/30 flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <UserPlus className="w-4 h-4 text-brand-rose animate-bounce" />
+                        <span className="text-xs text-brand-rose font-medium">Customer requested a live agent</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleConfirmClaim(currentAgent.full_name || 'Support Agent', currentAgent.email || '')}
+                        disabled={claiming}
+                        className="px-4 py-1.5 rounded-xl bg-brand-rose hover:bg-rose-600 text-white text-xs font-bold transition-all shadow-md shadow-brand-rose/30 cursor-pointer"
+                      >
+                        {claiming ? 'Claiming...' : 'Claim Chat to Reply'}
+                      </button>
+                    </div>
+                  )}
+
+                  {isClaimedByOther && !isAdmin && (
+                    <div className="px-4 py-2 bg-brand-amber/10 border-t border-brand-amber/20 text-center text-xs text-brand-amber font-medium">
+                      This conversation is handled by {selectedConv.assigned_agent_name} (Read-only)
+                    </div>
+                  )}
+
                   {/* Reply Form */}
                   <form onSubmit={handleSendMessage} className="p-3 border-t border-dark-border bg-dark-surface/60 space-y-2">
                     <div className="flex items-center justify-between text-[11px]">
@@ -981,8 +992,6 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       </button>
                     </div>
                   </form>
-                </>
-              )}
             </>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-dark-muted text-xs space-y-2">

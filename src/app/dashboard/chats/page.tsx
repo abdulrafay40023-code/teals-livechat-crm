@@ -21,7 +21,14 @@ export default function ChatsPage() {
   });
 
   const { conversations, refreshSync, resetUnreadCount, markConversationAsRead } = useLiveSync();
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        return localStorage.getItem('teals_selected_chat_id') || null;
+      } catch {}
+    }
+    return null;
+  });
 
   useEffect(() => {
     const rawSession = localStorage.getItem('teals_agent_session');
@@ -49,7 +56,12 @@ export default function ChatsPage() {
         conversations={conversations as unknown as ChatSession[]}
         onSelectChat={(id) => {
           setSelectedChatId(id || null);
-          if (id) markConversationAsRead(id);
+          if (id) {
+            try { localStorage.setItem('teals_selected_chat_id', id); } catch {}
+            markConversationAsRead(id);
+          } else {
+            try { localStorage.removeItem('teals_selected_chat_id'); } catch {}
+          }
         }}
         onClaimSuccess={handleClaimSuccess}
         onMarkRead={markConversationAsRead}

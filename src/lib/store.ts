@@ -324,6 +324,9 @@ class GranularStore {
                   c.messages = sortMessagesChronologically(Array.from(msgMap.values()));
                   c.assigned_agent_id = c.assigned_agent_id || existing.assigned_agent_id;
                   c.assigned_agent_name = c.assigned_agent_name || existing.assigned_agent_name;
+                  c.assigned_agent_email = c.assigned_agent_email || existing.assigned_agent_email;
+                  c.mode = (c.assigned_agent_id || existing.assigned_agent_id || c.mode === 'human' || existing.mode === 'human') ? 'human' : 'ai';
+                  c.status = (c.assigned_agent_id || existing.assigned_agent_id) ? 'active' : (c.status === 'pending_agent' || existing.status === 'pending_agent' ? 'pending_agent' : c.status);
                 } else {
                   c.messages = sortMessagesChronologically(c.messages || []);
                 }

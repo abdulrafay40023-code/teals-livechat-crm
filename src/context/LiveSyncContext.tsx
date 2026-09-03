@@ -103,7 +103,23 @@ const getUserStorageKey = () => {
 
 export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [liveVisitors, setLiveVisitors] = useState<LiveVisitor[]>([]);
-  const [conversations, setConversations] = useState<LiveConversation[]>([]);
+  const [conversations, setConversations] = useState<LiveConversation[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('teals_cached_conversations');
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && conversations.length > 0) {
+      try {
+        localStorage.setItem('teals_cached_conversations', JSON.stringify(conversations));
+      } catch {}
+    }
+  }, [conversations]);
   const [liveCount, setLiveCount] = useState<number>(0);
   const [todayCount, setTodayCount] = useState<number>(0);
   const [totalUniqueCount, setTotalUniqueCount] = useState<number>(0);
@@ -637,6 +653,12 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setUnreadCount(0);
     setLiveVisitors([]);
     setConversations([]);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('teals_cached_conversations');
+        localStorage.removeItem('teals_selected_chat_id');
+      } catch {}
+    }
     setLiveCount(0);
     setTodayCount(0);
     setTotalUniqueCount(0);
