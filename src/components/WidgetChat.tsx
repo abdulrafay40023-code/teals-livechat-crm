@@ -114,6 +114,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   const isWidgetUserScrolledUp = useRef<boolean>(false);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const visitorTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleWidgetScroll = () => {
     if (!widgetChatContainerRef.current) return;
@@ -147,21 +148,6 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               localStorage.setItem('teals_visitor_conv_list', JSON.stringify(merged));
             } catch {}
             return merged;
-          });
-
-          // If current active chat is empty or fresh, automatically load the latest conversation's messages
-          setMessages(currentMsgs => {
-            if (currentMsgs.length <= 1 && data.conversations[0]?.messages?.length > 1) {
-              const latest = data.conversations[0];
-              setConversationId(latest.id);
-              try { localStorage.setItem('teals_active_conv_id', latest.id); } catch {}
-              if (latest.mode === 'human' && latest.assigned_agent_name) {
-                setIsHumanConnected(true);
-                setAgentName(latest.assigned_agent_name);
-              }
-              return dedupeMessages(latest.messages);
-            }
-            return currentMsgs;
           });
         }
       }
@@ -242,6 +228,17 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
     const targetConvId = activeConvId || token;
     setConversationId(targetConvId);
+
+    // 0ms INSTANT LOCAL CACHE RESTORE (Zero network delay on refresh)
+    try {
+      const cached = localStorage.getItem('teals_conv_cache_' + targetConvId);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(dedupeMessages(parsed));
+        }
+      }
+    } catch {}
 
     // Track visitor session (fire and forget)
     fetch('/api/visitor/track', {
@@ -519,6 +516,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   const handleInputChange = (val: string) => {
     setInputText(val);
+
+    if (visitorTextareaRef.current) {
+      visitorTextareaRef.current.style.height = 'auto';
+      const scrollH = visitorTextareaRef.current.scrollHeight;
+      visitorTextareaRef.current.style.height = `${Math.min(Math.max(scrollH, 36), 110)}px`;
+    }
+
     if (!conversationId) return;
 
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -684,17 +688,19 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     setIsHumanConnected(false);
     setAgentName(null);
     setViewingHistory(false);
-    setMessages([
-      {
-        id: 'init-greet',
-        sender_type: 'ai',
-        sender_name: 'Teals AI Agent',
-        content: DEFAULT_GREETING,
-        seq: 1,
-        status: 'read',
-        created_at: '1970-01-01T00:00:00.000Z'
-      }
-    ]);
+    const initGreet = {
+      id: 'init-greet',
+      sender_type: 'ai' as const,
+      sender_name: 'Teals AI Agent',
+      content: DEFAULT_GREETING,
+      seq: 1,
+      status: 'read' as const,
+      created_at: '1970-01-01T00:00:00.000Z'
+    };
+    setMessages([initGreet]);
+    try {
+      localStorage.setItem('teals_conv_cache_' + newConvId, JSON.stringify([initGreet]));
+    } catch {}
   };
 
   const handleSend = async (e: React.FormEvent) => {
@@ -703,6 +709,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
     const userText = inputText.trim();
     setInputText('');
+    if (visitorTextareaRef.current) {
+      visitorTextareaRef.current.style.height = '36px';
+      setTimeout(() => visitorTextareaRef.current?.focus(), 10);
+    }
     setLoading(true);
     setShowGreetingBubble(false);
 
@@ -1171,6 +1181,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               {/* Chat Input */}
               <form onSubmit={handleSend} className="p-2.5 border-t border-gray-800 bg-[#11192e] flex items-center space-x-2">
                 <textarea
+                  ref={visitorTextareaRef}
                   value={inputText}
                   onChange={(e) => handleInputChange(e.target.value)}
                   onKeyDown={(e) => {
@@ -1181,8 +1192,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   }}
                   rows={1}
                   placeholder="Ask something about Teals CRM (Enter to send)..."
-                  className="flex-1 bg-[#131b2e] border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none overflow-y-auto max-h-28 leading-relaxed"
-                  style={{ minHeight: '36px' }}
+                  className="flex-1 bg-[#131b2e] border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none overflow-y-auto leading-relaxed transition-[height] duration-75"
+                  style={{ minHeight: '36px', maxHeight: '110px' }}
                 />
                 <button
                   type="submit"

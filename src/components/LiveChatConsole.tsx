@@ -437,6 +437,13 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
   const handleAgentInputChange = (val: string) => {
     setInputText(val);
+
+    if (agentInputRef.current) {
+      agentInputRef.current.style.height = 'auto';
+      const scrollH = agentInputRef.current.scrollHeight;
+      agentInputRef.current.style.height = `${Math.min(Math.max(scrollH, 38), 120)}px`;
+    }
+
     if (!selectedConv?.id || (!isClaimedByMe && !isAdmin)) return;
 
     if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
@@ -550,7 +557,10 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     const text = inputText.trim();
     setInputText('');
     setSending(true);
-    agentInputRef.current?.focus();
+    if (agentInputRef.current) {
+      agentInputRef.current.style.height = '38px';
+      agentInputRef.current.focus();
+    }
 
     if (typingTimerRef.current) {
       clearTimeout(typingTimerRef.current);
@@ -994,8 +1004,8 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                             ? 'AI is active. Claim chat to reply directly...'
                             : 'Claim this chat to reply...'
                         }
-                        className="flex-1 bg-dark-card border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-dark-muted focus:outline-none focus:border-brand-primary disabled:opacity-40 resize-none overflow-y-auto max-h-28 leading-relaxed"
-                        style={{ minHeight: '38px' }}
+                        className="flex-1 bg-dark-card border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-dark-muted focus:outline-none focus:border-brand-primary disabled:opacity-40 resize-none overflow-y-auto leading-relaxed transition-[height] duration-75"
+                        style={{ minHeight: '38px', maxHeight: '120px' }}
                       />
                       <button
                         type="submit"
