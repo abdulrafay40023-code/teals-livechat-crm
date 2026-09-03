@@ -27,6 +27,7 @@ export interface ChatSession {
   mode: 'ai' | 'human';
   status: 'active' | 'pending_agent' | 'resolved';
   typing_preview?: string;
+  created_at?: string;
   updated_at: string;
   messages?: Array<{ id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; status?: 'sent' | 'delivered' | 'read'; created_at: string }>;
   visitor?: {
@@ -107,11 +108,14 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   // Sort visible conversations so the one with the latest message is ALWAYS at the very top (WhatsApp style)
   const sortedVisibleConversations = [...visibleConversations].sort((a, b) => {
     const getLatestTime = (c: ChatSession) => {
+      let maxTime = new Date(c.updated_at || c.created_at || 0).getTime();
       if (c.messages && c.messages.length > 0) {
-        const last = c.messages[c.messages.length - 1];
-        return new Date(last.created_at || c.updated_at || 0).getTime();
+        c.messages.forEach(m => {
+          const t = new Date(m.created_at || 0).getTime();
+          if (t > maxTime) maxTime = t;
+        });
       }
-      return new Date(c.updated_at || 0).getTime();
+      return maxTime;
     };
     return getLatestTime(b) - getLatestTime(a);
   });
@@ -119,13 +123,21 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   // Calculate unread count for each conversation
   const getUnreadCountForConv = (conv: ChatSession) => {
     if (conv.id === selectedChatId) return 0;
+    
+    // 1. AI-only automated chats NEVER generate unread notification badges
+    const isNeedsHuman = conv.mode === 'human' || conv.status === 'pending_agent';
+    const isClaimed = !!(conv.assigned_agent_id || conv.assigned_agent_name);
+    if (!isNeedsHuman && !isClaimed) return 0;
+
     if (!conv.messages || conv.messages.length === 0) return 0;
 
+    // 2. If the latest message is from an agent, AI, or system, then the user has been answered -> 0 unread
     const lastMsg = conv.messages[conv.messages.length - 1];
-    if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'system')) {
+    if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'ai' || lastMsg.sender_type === 'system')) {
       return 0;
     }
 
+    // 3. Find pending visitor messages after the last agent reply
     let lastAgentIdx = -1;
     for (let i = conv.messages.length - 1; i >= 0; i--) {
       if (conv.messages[i].sender_type === 'agent') {
@@ -226,10 +238,15 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
           }
 
           setMessages((prev) => {
-            const nextList = [...prev];
-            if (message) nextList.push(message);
-            if (systemMessage) nextList.push(systemMessage);
-            return sortTimelineMessages(nextList);
+            const map = new Map<string, any>();
+            prev.forEach(m => {
+              if (!(m as any).conversation_id || (m as any).conversation_id === targetId) {
+                map.set(m.id, m);
+              }
+            });
+            if (message) map.set(message.id, { ...message, conversation_id: targetId });
+            if (systemMessage) map.set(systemMessage.id, { ...systemMessage, conversation_id: targetId });
+            return sortTimelineMessages(Array.from(map.values()));
           });
         }
       })
@@ -239,7 +256,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         const conv = (raw as Record<string, unknown>)?.conversation as { messages?: Array<{ id: string; sender_type: string; sender_name: string; content: string; is_whisper: boolean; seq?: number; created_at: string }> };
 
         if (cId === targetId && conv?.messages && Array.isArray(conv.messages)) {
-          setMessages(prev => sortTimelineMessages([...prev, ...conv.messages!]));
+          setMessages(sortTimelineMessages(conv.messages));
         }
       })
       .on('broadcast', { event: 'typing_event' }, (payload: unknown) => {
@@ -267,20 +284,10 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         }
       })
       .on('broadcast', { event: 'stats_reset' }, () => {
-        try {
-          Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('teals_agent_cache_')) localStorage.removeItem(k);
-          });
-        } catch {}
         setMessages([]);
         setLiveTypingPreview(null);
       })
       .on('broadcast', { event: 'system_reset' }, () => {
-        try {
-          Object.keys(localStorage).forEach(k => {
-            if (k.startsWith('teals_agent_cache_')) localStorage.removeItem(k);
-          });
-        } catch {}
         setMessages([]);
         setLiveTypingPreview(null);
       })
@@ -296,8 +303,8 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
           const data = await res.json();
-          if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-            setMessages(prev => sortTimelineMessages([...prev, ...data.messages]));
+          if (data.messages && Array.isArray(data.messages) && targetId === selectedConv?.id) {
+            setMessages(sortTimelineMessages(data.messages));
           }
         }
       } catch {}
@@ -315,48 +322,24 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
   // Synchronize messages immediately when selectedConv updates in parent conversations list
   useEffect(() => {
-    if (selectedConv?.messages && Array.isArray(selectedConv.messages) && selectedConv.messages.length > 0) {
-      if (selectedConv.id) {
-        onMarkRead?.(selectedConv.id);
-      }
-      setMessages((prev) => {
-        const serverMap = new Map();
-        selectedConv.messages!.forEach(m => serverMap.set(m.id, m));
-        // Keep any in-flight optimistic messages that haven't been saved on server yet
-        const inFlight = prev.filter(p => !serverMap.has(p.id) && ((p as any).conversation_id === selectedConv.id || !(p as any).conversation_id));
-        return sortTimelineMessages([...selectedConv.messages!, ...inFlight]);
-      });
+    if (!selectedConv?.id) {
+      setMessages([]);
+      setLiveTypingPreview(null);
+      return;
+    }
 
+    onMarkRead?.(selectedConv.id);
+
+    if (selectedConv.messages && Array.isArray(selectedConv.messages)) {
+      setMessages(sortTimelineMessages(selectedConv.messages));
       const last = selectedConv.messages[selectedConv.messages.length - 1];
       if (last && last.sender_type === 'visitor') {
         setLiveTypingPreview(null);
       }
+    } else {
+      setMessages([]);
     }
-  }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at]);
-
-  // 0ms instant local cache restore on conversation change or page refresh (never blank)
-  useEffect(() => {
-    const targetId = selectedConv?.id;
-    if (!targetId) return;
-    try {
-      const cached = localStorage.getItem('teals_agent_cache_' + targetId);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(sortTimelineMessages(parsed));
-        }
-      }
-    } catch {}
-  }, [selectedConv?.id]);
-
-  // Persist messages to local cache for 0ms refresh
-  useEffect(() => {
-    const targetId = selectedConv?.id;
-    if (!targetId || messages.length === 0) return;
-    try {
-      localStorage.setItem('teals_agent_cache_' + targetId, JSON.stringify(messages));
-    } catch {}
-  }, [selectedConv?.id, messages]);
+  }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at, onMarkRead]);
 
   useEffect(() => {
     // Only auto-scroll if user is near the bottom

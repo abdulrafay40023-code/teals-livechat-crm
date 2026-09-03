@@ -139,11 +139,21 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const isAdm = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com';
 
     return convList.filter(c => {
-      if (!c.messages || c.messages.length === 0) return false;
-      const lastMsg = c.messages[c.messages.length - 1];
-      // If the latest message is from an agent or system, then the agent has already answered -> not unread
-      if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'system')) return false;
+      // 1. AI-only chats (where no human has been requested or assigned) NEVER have unread count
+      const isNeedsHuman = c.mode === 'human' || c.status === 'pending_agent';
+      const isClaimed = !!(c.assigned_agent_id || c.assigned_agent_name);
+      if (!isNeedsHuman && !isClaimed) return false;
 
+      // 2. Must have messages
+      if (!c.messages || c.messages.length === 0) return false;
+
+      // 3. If the latest message is from an agent, AI, or system, then the user has been answered -> not unread
+      const lastMsg = c.messages[c.messages.length - 1];
+      if (lastMsg && (lastMsg.sender_type === 'agent' || lastMsg.sender_type === 'ai' || lastMsg.sender_type === 'system')) {
+        return false;
+      }
+
+      // 4. Find pending visitor messages after the last agent reply
       let lastAgentIdx = -1;
       for (let i = c.messages.length - 1; i >= 0; i--) {
         if (c.messages[i].sender_type === 'agent') {
@@ -156,7 +166,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (pendingVisitorMsgs.length === 0) return false;
       const lastVisitorMsg = pendingVisitorMsgs[pendingVisitorMsgs.length - 1];
 
-      // If marked read by ID or read timestamp is >= message timestamp
+      // 5. If marked read by ID or read timestamp is >= message timestamp
       const readVal = readMap[c.id];
       if (readVal) {
         if (readVal === lastVisitorMsg.id) return false;
@@ -165,13 +175,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (!isNaN(readTime) && readTime >= msgTime) return false;
       }
 
+      // 6. Admin sees whatever unread chats exist for agents (needs human or claimed)
       if (isAdm) return true;
+
+      // 7. Regular agent sees their claimed chats OR chats waiting for pickup
       const isMine = !!(
         (c.assigned_agent_id && c.assigned_agent_id === currentUser?.id) ||
         (c.assigned_agent_name && c.assigned_agent_name.toLowerCase() === currentUser?.full_name?.toLowerCase()) ||
         (c.assigned_agent_email && c.assigned_agent_email.toLowerCase() === currentUser?.email?.toLowerCase())
       );
-      const isNeedsHuman = !c.assigned_agent_id && !c.assigned_agent_name && (c.mode === 'human' || c.status === 'pending_agent');
       return isMine || isNeedsHuman;
     }).length;
   }, []);
@@ -452,7 +464,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               assigned_agent_id: effectiveAssignedId,
               assigned_agent_name: effectiveAssignedName,
               assigned_agent_email: effectiveAssignedEmail,
-              messages: mergedMessages
+              messages: mergedMessages,
+              updated_at: new Date().toISOString()
             };
 
             const isHumanActive = mergedConv.mode === 'human' || mergedConv.status === 'pending_agent' || !!mergedConv.assigned_agent_id;
@@ -473,11 +486,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             setChatCount(updated.length);
             return updated;
           });
-
-          // Increment unread badge for admin on any visitor message
-          if (isAdmin && isVisitorMsg) {
-            setUnreadCount(prev => prev + 1);
-          }
         }
 
         // Beep logic — simplified (queueOrPlay handles AudioContext internally)
