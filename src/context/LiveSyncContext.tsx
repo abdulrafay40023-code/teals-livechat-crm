@@ -114,9 +114,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && conversations.length > 0) {
+    if (typeof window !== 'undefined') {
       try {
-        localStorage.setItem('teals_cached_conversations', JSON.stringify(conversations));
+        if (conversations.length > 0) {
+          localStorage.setItem('teals_cached_conversations', JSON.stringify(conversations));
+        } else {
+          localStorage.removeItem('teals_cached_conversations');
+        }
       } catch {}
     }
   }, [conversations]);
@@ -261,19 +265,28 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setPageViews(data.pageViews || 0);
 
       const convsList: LiveConversation[] = Array.isArray(data.conversations) ? data.conversations : [];
+      if (convsList.length === 0) {
+        setConversations([]);
+        setChatCount(0);
+        if (typeof window !== 'undefined') {
+          try {
+            Object.keys(localStorage).forEach(k => {
+              if (k.startsWith('teals_cached_') || k.startsWith('teals_selected_') || k.startsWith('teals_read_map')) {
+                localStorage.removeItem(k);
+              }
+            });
+          } catch {}
+        }
+        return;
+      }
+
       // NON-DESTRUCTIVE UNION MERGE: never let a background sync poll erase newer messages received via WebSockets
       setConversations(prev => {
-        const map = new Map<string, LiveConversation>();
-        // 1. Keep all existing conversations in prev
-        prev.forEach(c => map.set(c.id, c));
+        const prevMap = new Map(prev.map(c => [c.id, c]));
 
-        // 2. Merge server conversations into map
-        convsList.forEach(apiConv => {
-          const prevConv = map.get(apiConv.id);
-          if (!prevConv) {
-            map.set(apiConv.id, apiConv);
-            return;
-          }
+        const updatedList: LiveConversation[] = convsList.map(apiConv => {
+          const prevConv = prevMap.get(apiConv.id);
+          if (!prevConv) return apiConv;
 
           const msgMap = new Map<string, LiveMessage>();
           (prevConv.messages || []).forEach(m => msgMap.set(m.id, m));
@@ -298,7 +311,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ? 'active'
             : (apiConv.status === 'pending_agent' || prevConv.status === 'pending_agent' ? 'pending_agent' : 'active');
 
-          map.set(apiConv.id, {
+          return {
             ...prevConv,
             ...apiConv,
             visitor_name: apiConv.visitor_name || prevConv.visitor_name,
@@ -309,12 +322,11 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             assigned_agent_name: effectiveAssignedName,
             assigned_agent_email: effectiveAssignedEmail,
             messages: mergedMessages
-          });
+          };
         });
 
-        const mergedList = Array.from(map.values());
-        setChatCount(mergedList.length);
-        return mergedList;
+        setChatCount(updatedList.length);
+        return updatedList;
       });
 
       if (!initialLoadDone.current) {
@@ -600,6 +612,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTotalUniqueCount(0);
         setChatCount(0);
         setPageViews(0);
+        if (typeof window !== 'undefined') {
+          try {
+            Object.keys(localStorage).forEach(k => {
+              if (k.startsWith('teals_cached_') || k.startsWith('teals_selected_') || k.startsWith('teals_read_map')) {
+                localStorage.removeItem(k);
+              }
+            });
+          } catch {}
+        }
       })
       .on('broadcast', { event: 'system_reset' }, () => {
         console.log('[SYNC_DEBUG] WebSocket system_reset event received.');
@@ -611,6 +632,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setTotalUniqueCount(0);
         setChatCount(0);
         setPageViews(0);
+        if (typeof window !== 'undefined') {
+          try {
+            Object.keys(localStorage).forEach(k => {
+              if (k.startsWith('teals_cached_') || k.startsWith('teals_selected_') || k.startsWith('teals_read_map')) {
+                localStorage.removeItem(k);
+              }
+            });
+          } catch {}
+        }
       })
       .subscribe((status) => {
         if (status === 'TIMED_OUT' || status === 'CLOSED') {

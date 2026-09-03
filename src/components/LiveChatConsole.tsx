@@ -310,8 +310,13 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     };
   }, [selectedConv?.id, isClaimedByOther, isAdmin, onMarkRead]);
 
-  // Auto-select latest active conversation if none selected
+  // Auto-select latest active conversation if none selected, or reset if conversations is empty
   useEffect(() => {
+    if (conversations.length === 0) {
+      if (selectedChatId) onSelectChat('');
+      setMessages([]);
+      return;
+    }
     if ((!selectedChatId || !conversations.some(c => c.id === selectedChatId)) && sortedVisibleConversations.length > 0) {
       onSelectChat(sortedVisibleConversations[0].id);
     }
