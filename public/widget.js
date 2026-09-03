@@ -113,7 +113,7 @@
   if (!isAdmin) {
     var iframe = document.createElement('iframe');
     iframe.id = 'teals-livechat-iframe';
-    iframe.src = serverOrigin + '/widget?property=' + encodeURIComponent(propertySlug) + '&session=' + encodeURIComponent(tabSessionId) + '&token=' + encodeURIComponent(visitorToken);
+    iframe.src = serverOrigin + '/widget?property=' + encodeURIComponent(propertySlug) + '&session=' + encodeURIComponent(tabSessionId) + '&token=' + encodeURIComponent(visitorToken) + '&_v=20260904_1';
     iframe.style.position = 'fixed';
     iframe.style.bottom = '20px';
     iframe.style.right = '20px';

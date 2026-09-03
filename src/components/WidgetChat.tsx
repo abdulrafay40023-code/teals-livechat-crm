@@ -141,8 +141,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
           setSavedConversations(prev => {
             const map = new Map<string, SavedConvSummary>();
-            prev.forEach(c => map.set(c.id, c));
             mapped.forEach(c => map.set(c.id, c));
+            prev.forEach(c => {
+              if (!map.has(c.id)) map.set(c.id, c);
+            });
             const merged = Array.from(map.values());
             try {
               localStorage.setItem('teals_visitor_conv_list', JSON.stringify(merged));
@@ -619,6 +621,14 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     } catch {}
   };
 
+  // Open conversations history and fetch latest server records
+  const handleOpenConversations = () => {
+    setViewingHistory(true);
+    const cleanEmail = userEmail || (typeof window !== 'undefined' ? localStorage.getItem('teals_lead_email') || '' : '');
+    const token = visitorToken || (typeof window !== 'undefined' ? localStorage.getItem('teals_visitor_token') || '' : '');
+    fetchVisitorConversations(token, cleanEmail);
+  };
+
   // Switch to a previous conversation
   const handleSelectOldChat = async (convId: string) => {
     // If currently on a conversation with real messages, save its cache
@@ -930,7 +940,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             <div className="flex items-center space-x-2.5">
               {hasSubmittedLead && !viewingHistory ? (
                 <button
-                  onClick={() => setViewingHistory(true)}
+                  onClick={handleOpenConversations}
                   className="p-1 px-2 rounded-lg bg-gray-800 text-gray-300 hover:text-white flex items-center space-x-1 text-xs border border-gray-700 flex-shrink-0"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
@@ -988,7 +998,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   </button>
                   {savedConversations.length > 0 && (
                     <button
-                      onClick={() => setViewingHistory(true)}
+                      onClick={handleOpenConversations}
                       title="Previous Chats"
                       className="p-1.5 rounded-xl text-gray-400 hover:text-white hover:bg-gray-800 transition-colors flex items-center space-x-1 text-[10px]"
                     >
