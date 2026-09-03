@@ -677,7 +677,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         setTransferModalOpen(false);
         setTransferAgentName('');
         setTransferAgentEmail('');
-        onClaimSuccess?.(selectedConv.id);
+        onClaimSuccess?.();
       } else {
         setTransferError(data.error || 'Failed to transfer chat.');
       }
