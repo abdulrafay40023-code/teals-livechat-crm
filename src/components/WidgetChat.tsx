@@ -236,7 +236,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       })
     }).catch(() => {});
 
-    // Restore full conversation history from server
+    // Restore full conversation history from server or local cache
     const restoreChatHistory = async () => {
       try {
         const res = await fetch('/api/chat/message?conversationId=' + targetConvId);
@@ -244,23 +244,26 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           const data = await res.json();
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
             setMessages(dedupeMessages(data.conversation.messages));
+            try {
+              localStorage.setItem('teals_conv_cache_' + targetConvId, JSON.stringify(data.conversation.messages));
+            } catch {}
             if (data.conversation.mode === 'human' && data.conversation.assigned_agent_name) {
               setIsHumanConnected(true);
               setAgentName(data.conversation.assigned_agent_name);
             }
           } else {
-            // Conversation does not exist on server (was reset or deleted)
+            // Restore from local cache if present
             try {
-              Object.keys(localStorage).forEach(k => {
-                if (k.startsWith('teals_')) localStorage.removeItem(k);
-              });
+              const localCached = localStorage.getItem('teals_conv_cache_' + targetConvId);
+              if (localCached) {
+                const parsed = JSON.parse(localCached);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  setMessages(dedupeMessages(parsed));
+                  return;
+                }
+              }
             } catch {}
-            setSavedConversations([]);
-            setHasSubmittedLead(false);
-            setConversationId(null);
-            setIsHumanConnected(false);
-            setAgentName(null);
-            setViewingHistory(false);
+
             setMessages([
               {
                 id: 'init-greet',
@@ -275,6 +278,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           }
         }
       } catch {}
+
+      // Fetch all conversations for this visitor so YOUR CONVERSATIONS is always up to date
+      fetchVisitorConversations(token, userEmail || undefined);
     };
 
     restoreChatHistory();
@@ -579,9 +585,23 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   // Switch to a previous conversation
   const handleSelectOldChat = async (convId: string) => {
+    // If currently on a conversation, save its cache
+    if (conversationId && messages.length > 0) {
+      try {
+        localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
+      } catch {}
+    }
+
     setConversationId(convId);
     try {
       localStorage.setItem('teals_active_conv_id', convId);
+      const localCached = localStorage.getItem('teals_conv_cache_' + convId);
+      if (localCached) {
+        const parsed = JSON.parse(localCached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setMessages(dedupeMessages(parsed));
+        }
+      }
     } catch {}
     setViewingHistory(false);
     setIsHumanConnected(false);
@@ -591,8 +611,11 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       const res = await fetch('/api/chat/message?conversationId=' + convId);
       if (res.ok) {
         const data = await res.json();
-        if (data.messages && Array.isArray(data.messages)) {
+        if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
           setMessages(dedupeMessages(data.messages));
+          try {
+            localStorage.setItem('teals_conv_cache_' + convId, JSON.stringify(data.messages));
+          } catch {}
         }
         if (data.conversation?.mode === 'human' && data.conversation.assigned_agent_name) {
           setIsHumanConnected(true);
@@ -605,20 +628,19 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   // Start a brand new conversation and preserve old ones
   const handleStartNewChat = () => {
     // 1. Save current conversation to history list
-    if (conversationId && messages.length > 1) {
-      const lastMsg = messages[messages.length - 1]?.content || 'Chat Session';
-      const updatedList = [
-        { id: conversationId, lastMessage: lastMsg, updatedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) },
-        ...savedConversations.filter(c => c.id !== conversationId)
-      ];
-      setSavedConversations(updatedList);
+    let currentList = [...savedConversations];
+    if (conversationId) {
+      const lastMsg = messages.length > 1 ? (messages[messages.length - 1]?.content || 'Chat Session') : DEFAULT_GREETING;
+      const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const currentEntry: SavedConvSummary = { id: conversationId, lastMessage: lastMsg, updatedAt: timeStr };
+      currentList = [currentEntry, ...currentList.filter(c => c.id !== conversationId)];
       try {
-        localStorage.setItem('teals_visitor_conv_list', JSON.stringify(updatedList));
+        localStorage.setItem('teals_conv_cache_' + conversationId, JSON.stringify(messages));
       } catch {}
     }
 
     // 2. Generate new conversation ID
-    const newConvId = 'conv_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
+    const newConvId = 'conv_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
     setConversationId(newConvId);
     try {
       localStorage.setItem('teals_active_conv_id', newConvId);
@@ -629,7 +651,12 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       lastMessage: DEFAULT_GREETING,
       updatedAt: 'Just now'
     };
-    setSavedConversations(prev => [newConvSummary, ...prev.filter(c => c.id !== newConvId)]);
+
+    const finalList = [newConvSummary, ...currentList.filter(c => c.id !== newConvId)];
+    setSavedConversations(finalList);
+    try {
+      localStorage.setItem('teals_visitor_conv_list', JSON.stringify(finalList));
+    } catch {}
 
     setIsHumanConnected(false);
     setAgentName(null);
@@ -999,8 +1026,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white">
-                            {isCurrent ? 'Teals AI Auto-Support' : `Support Chat #${(savedConversations.length || 1) - idx}`}
+                          <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                            <span>{`Chat #${(savedConversations.length || 1) - idx}`}</span>
+                            {isCurrent && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold">
+                                Active
+                              </span>
+                            )}
                           </span>
                           <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{c.updatedAt || 'Just now'}</span>
                         </div>
