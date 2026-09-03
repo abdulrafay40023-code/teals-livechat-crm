@@ -522,13 +522,14 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     }
   }, [isOpen, conversationId]);
 
-  const handleInputChange = (val: string) => {
+  const handleInputChange = (val: string, el?: HTMLTextAreaElement | null) => {
     setInputText(val);
 
-    if (visitorTextareaRef.current) {
-      visitorTextareaRef.current.style.height = 'auto';
-      const scrollH = visitorTextareaRef.current.scrollHeight;
-      visitorTextareaRef.current.style.height = `${Math.min(Math.max(scrollH, 36), 110)}px`;
+    const textarea = el || visitorTextareaRef.current;
+    if (textarea) {
+      textarea.style.height = '0px';
+      const scrollH = textarea.scrollHeight;
+      textarea.style.height = `${Math.min(Math.max(scrollH, 38), 130)}px`;
     }
 
     if (!conversationId) return;
@@ -740,7 +741,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     const userText = inputText.trim();
     setInputText('');
     if (visitorTextareaRef.current) {
-      visitorTextareaRef.current.style.height = '36px';
+      visitorTextareaRef.current.style.height = '38px';
       setTimeout(() => visitorTextareaRef.current?.focus(), 10);
     }
     setLoading(true);
@@ -1209,11 +1210,11 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               </div>
 
               {/* Chat Input */}
-              <form onSubmit={handleSend} className="p-2.5 border-t border-gray-800 bg-[#11192e] flex items-center space-x-2">
+              <form onSubmit={handleSend} className="p-2.5 border-t border-gray-800 bg-[#11192e] flex items-end space-x-2">
                 <textarea
                   ref={visitorTextareaRef}
                   value={inputText}
-                  onChange={(e) => handleInputChange(e.target.value)}
+                  onChange={(e) => handleInputChange(e.target.value, e.currentTarget)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -1222,13 +1223,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   }}
                   rows={1}
                   placeholder="Ask something about Teals CRM (Enter to send)..."
-                  className="flex-1 bg-[#131b2e] border border-gray-700 rounded-xl px-3.5 py-2 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none overflow-y-auto leading-relaxed transition-[height] duration-75"
-                  style={{ minHeight: '36px', maxHeight: '110px' }}
+                  className="flex-1 bg-[#131b2e] border border-gray-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none overflow-y-auto whitespace-pre-wrap break-words leading-relaxed transition-[height] duration-75"
+                  style={{ minHeight: '38px', maxHeight: '130px' }}
                 />
                 <button
                   type="submit"
                   disabled={loading || !inputText.trim()}
-                  className="p-2 rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-all disabled:opacity-40 flex-shrink-0"
+                  className="p-2.5 rounded-xl bg-blue-600 text-white hover:bg-blue-500 transition-all disabled:opacity-40 flex-shrink-0 mb-0.5 shadow-md"
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>

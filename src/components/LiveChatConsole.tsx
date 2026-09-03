@@ -435,13 +435,14 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     }
   };
 
-  const handleAgentInputChange = (val: string) => {
+  const handleAgentInputChange = (val: string, el?: HTMLTextAreaElement | null) => {
     setInputText(val);
 
-    if (agentInputRef.current) {
-      agentInputRef.current.style.height = 'auto';
-      const scrollH = agentInputRef.current.scrollHeight;
-      agentInputRef.current.style.height = `${Math.min(Math.max(scrollH, 38), 120)}px`;
+    const textarea = el || agentInputRef.current;
+    if (textarea) {
+      textarea.style.height = '0px';
+      const scrollH = textarea.scrollHeight;
+      textarea.style.height = `${Math.min(Math.max(scrollH, 38), 130)}px`;
     }
 
     if (!selectedConv?.id || (!isClaimedByMe && !isAdmin)) return;
@@ -983,11 +984,11 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                       </button>
                     </div>
 
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-end space-x-2">
                       <textarea
                         ref={agentInputRef}
                         value={inputText}
-                        onChange={(e) => handleAgentInputChange(e.target.value)}
+                        onChange={(e) => handleAgentInputChange(e.target.value, e.currentTarget)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
@@ -1004,13 +1005,13 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                             ? 'AI is active. Claim chat to reply directly...'
                             : 'Claim this chat to reply...'
                         }
-                        className="flex-1 bg-dark-card border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-dark-muted focus:outline-none focus:border-brand-primary disabled:opacity-40 resize-none overflow-y-auto leading-relaxed transition-[height] duration-75"
-                        style={{ minHeight: '38px', maxHeight: '120px' }}
+                        className="flex-1 bg-dark-card border border-dark-border rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-dark-muted focus:outline-none focus:border-brand-primary disabled:opacity-40 resize-none overflow-y-auto whitespace-pre-wrap break-words leading-relaxed transition-[height] duration-75"
+                        style={{ minHeight: '38px', maxHeight: '130px' }}
                       />
                       <button
                         type="submit"
                         disabled={(!isClaimedByMe && !isAdmin) || sending || !inputText.trim()}
-                        className="p-2.5 rounded-xl bg-brand-primary text-white hover:bg-brand-primaryHover transition-all disabled:opacity-40 flex-shrink-0"
+                        className="p-2.5 rounded-xl bg-brand-primary text-white hover:bg-brand-primaryHover transition-all disabled:opacity-40 flex-shrink-0 mb-0.5 shadow-md"
                       >
                         <Send className="w-4 h-4" />
                       </button>
