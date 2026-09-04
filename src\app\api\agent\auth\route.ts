@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { memoryStore, StoreAgent } from '@/lib/store';
+import { memoryStore, granularStore, StoreAgent } from '@/lib/store';
+import { broadcastRealtimeEvent } from '@/lib/realtime';
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'garryamelia6265@gmail.com';
 
@@ -37,9 +38,21 @@ export async function POST(req: NextRequest) {
 
       memoryStore.agents.set(cleanEmail, newAgent);
       try {
+        await granularStore.saveAgent(newAgent);
+      } catch {}
+      try {
         await supabaseAdmin.from('agents').upsert(newAgent);
       } catch {
         // Fallback
+      }
+
+      // Broadcast realtime notification to Admin if pending approval
+      if (!isAdmin) {
+        broadcastRealtimeEvent('agent_pending_approval', {
+          agentName: newAgent.full_name,
+          agentEmail: newAgent.email,
+          agentPhone: newAgent.phone
+        }).catch(() => {});
       }
 
       return NextResponse.json({

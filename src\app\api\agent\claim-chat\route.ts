@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       }, { status: 409 });
     }
 
+    const isTransfer = (!!conv.assigned_agent_name && conv.assigned_agent_name !== agentName) || force;
     const now = new Date().toISOString();
     conv.assigned_agent_id = agentId;
     conv.assigned_agent_name = agentName;
@@ -36,7 +37,6 @@ export async function POST(req: NextRequest) {
     conv.mode = 'human';
     conv.status = 'active';
     const maxSeq = (conv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
-    const isTransfer = !!conv.assigned_agent_name && conv.assigned_agent_name !== agentName;
     const sysMsg: StoreMessage = {
       id: 'msg_sys_claim_' + conv.id + '_' + Date.now(),
       conversation_id: conv.id,

@@ -78,6 +78,8 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferAgentName, setTransferAgentName] = useState('');
   const [transferAgentEmail, setTransferAgentEmail] = useState('');
+  const [transferTargetAgentId, setTransferTargetAgentId] = useState('');
+  const [availableAgents, setAvailableAgents] = useState<Array<{ id: string; full_name: string; email: string; role: string; is_online?: boolean }>>([]);
   const [transferring, setTransferring] = useState(false);
   const [transferError, setTransferError] = useState<string | null>(null);
 
@@ -693,6 +695,23 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     }
   };
 
+  // Open transfer modal & prefetch approved agents
+  const openTransferModal = async () => {
+    setTransferModalOpen(true);
+    setTransferError(null);
+    setTransferAgentName('');
+    setTransferAgentEmail('');
+    setTransferTargetAgentId('');
+    try {
+      const res = await fetch('/api/agent/approvals');
+      if (res.ok) {
+        const data = await res.json();
+        const approved = Array.isArray(data.approvedAgents) ? data.approvedAgents : [];
+        setAvailableAgents(approved);
+      }
+    } catch {}
+  };
+
   // Transfer chat to another agent / admin
   const handleTransferChat = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -706,6 +725,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           conversationId: selectedConv.id,
+          agentId: transferTargetAgentId || undefined,
           agentName: transferAgentName.trim(),
           agentEmail: transferAgentEmail.trim() || undefined,
           force: true
@@ -716,6 +736,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
         setTransferModalOpen(false);
         setTransferAgentName('');
         setTransferAgentEmail('');
+        setTransferTargetAgentId('');
         onClaimSuccess?.();
       } else {
         setTransferError(data.error || 'Failed to transfer chat.');
@@ -1106,10 +1127,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
 
                   {(isClaimedByMe || isAdmin) && (selectedConv.assigned_agent_name || selectedConv.mode === 'human') && (
                     <button
-                      onClick={() => {
-                        setTransferModalOpen(true);
-                        setTransferError(null);
-                      }}
+                      onClick={openTransferModal}
                       title="Transfer Conversation to Another Agent / Admin"
                       className="px-2.5 py-1 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 border border-purple-500/30 text-xs font-bold transition-all flex items-center space-x-1 cursor-pointer"
                     >
@@ -1404,6 +1422,41 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
             )}
 
             <form onSubmit={handleTransferChat} className="space-y-3.5">
+              {availableAgents.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-gray-300">
+                    Select Team Member
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-[#131d33]/80 rounded-xl border border-dark-border/60">
+                    {availableAgents.map(ag => {
+                      const isSelected = transferAgentName === ag.full_name || (transferTargetAgentId && transferTargetAgentId === ag.id);
+                      return (
+                        <button
+                          key={ag.id}
+                          type="button"
+                          onClick={() => {
+                            setTransferAgentName(ag.full_name);
+                            setTransferAgentEmail(ag.email || '');
+                            setTransferTargetAgentId(ag.id);
+                          }}
+                          className={`text-[11px] px-2.5 py-1.5 rounded-lg border transition-all flex items-center space-x-1.5 cursor-pointer ${
+                            isSelected
+                              ? 'bg-purple-600/30 border-purple-500 text-purple-200 shadow-sm'
+                              : 'bg-[#18233e] border-dark-border hover:border-purple-500/50 text-gray-300'
+                          }`}
+                        >
+                          <span className={`w-2 h-2 rounded-full ${ag.is_online ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+                          <span className="font-semibold">{ag.full_name}</span>
+                          {ag.role === 'admin' && (
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-brand-amber/20 text-brand-amber font-bold">Admin</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-gray-300 mb-1">
                   Target Agent / Admin Name *

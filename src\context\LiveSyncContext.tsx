@@ -635,6 +635,29 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }));
         }
       })
+      .on('broadcast', { event: 'agent_pending_approval' }, (payload: unknown) => {
+        console.log('[SYNC_DEBUG] WebSocket agent_pending_approval event received:', payload);
+        let currentUser: { role?: string; email?: string } | null = null;
+        try {
+          const rawSession = localStorage.getItem('teals_agent_session');
+          if (rawSession) currentUser = JSON.parse(rawSession);
+        } catch {}
+        const isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com' || currentUser.email?.includes('garry');
+
+        if (isAdmin) {
+          if (soundEnabledRef.current) {
+            playHandoffAlertSound();
+          }
+          if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            const raw = (payload as Record<string, unknown>)?.payload || payload;
+            const agentName = (raw as Record<string, unknown>)?.agentName || 'A new agent';
+            new Notification('New Agent Approval Request', {
+              body: `${agentName} has submitted registration and is waiting for approval!`,
+              icon: '/favicon.ico'
+            });
+          }
+        }
+      })
       .on('broadcast', { event: 'stats_reset' }, () => {
         console.log('[SYNC_DEBUG] WebSocket stats_reset event received.');
         knownSessionIds.current.clear();
