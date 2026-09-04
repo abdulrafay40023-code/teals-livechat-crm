@@ -19,6 +19,34 @@ export function isHumanHandoffRequested(text: string): boolean {
   return hasAction && hasHuman;
 }
 
+export function isGibberish(text: string): boolean {
+  const clean = (text || '').trim().toLowerCase();
+  if (clean.length < 4) return false;
+
+  // 1. Repeated same character 4+ times in a row (e.g. "aaaaa", "zzzzzz")
+  if (/(.)\1{4,}/.test(clean)) return true;
+
+  // 2. Keyboard smash patterns
+  const smashPatterns = ['asdfgh', 'sdfghj', 'dfghjk', 'qwerty', 'wertyu', 'ertyui', 'zxcvbn', 'xcvbnm', 'lkjhgf'];
+  if (smashPatterns.some(p => clean.includes(p))) return true;
+
+  // 3. Single long word >= 10 characters with very low vowel ratio or consecutive consonant clusters
+  const words = clean.split(/\s+/);
+  for (const w of words) {
+    if (w.length >= 10 && !w.startsWith('http') && !w.includes('@')) {
+      const lettersOnly = w.replace(/[^a-z]/g, '');
+      if (lettersOnly.length >= 10) {
+        const vowels = lettersOnly.match(/[aeiou]/g) || [];
+        const vowelRatio = vowels.length / lettersOnly.length;
+        if (vowelRatio < 0.22) return true;
+        if (/[bcdfghjklmnpqrstvwxyz]{5,}/.test(lettersOnly)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 export async function generateAIChatResponse({
   messages,
   visitorName,
@@ -44,6 +72,16 @@ export async function generateAIChatResponse({
 
   const rawName = (visitorName || '').trim();
   const cleanName = rawName && rawName.toLowerCase() !== 'visitor' && rawName.toLowerCase() !== 'you' ? rawName : null;
+
+  // 2. Check for Gibberish / Keyboard Smashing (e.g. "aaaaa", "lkladjaldlawdhwlahd")
+  if (isGibberish(lastMsg)) {
+    return {
+      text: cleanName
+        ? `Hey ${cleanName}, I didn't quite catch that! Could you please let me know what questions you have about our services?`
+        : `I didn't quite catch that! Could you please let me know what questions you have about our services?`,
+      handoffRequired: false
+    };
+  }
 
   // 2. Greetings (expanded — catch "hey bro", "hello there", "salam", etc.)
   if (/^(hey|hi|hello|heyy|salam|aoa|hola|good morning|good afternoon|good evening|hey bro|hi there|hello there|heyy bro|what'?s up|sup|yo)(\s.*)?$/i.test(lower)) {
