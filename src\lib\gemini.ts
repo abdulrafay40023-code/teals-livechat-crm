@@ -6,13 +6,24 @@ const defaultApiKey = decodeKey('QUl6YVN5QWJRZUtnc3FEcGJRTUpDOXhGTnFXUm1DaTc3VmR
 export function isHumanHandoffRequested(text: string): boolean {
   const clean = (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Direct explicit phrases only — don't trigger on casual questions
-  const hasDirectPhrase = /(real person|real human|live agent|human agent|not ai|stop ai|human please|agent please|talk to human|talk to agent|speak to agent|connect to agent|speak to human|talk to a person|real support|insan se baat|bande se baat|real banda|actual person|actual human)/i.test(clean);
-  if (hasDirectPhrase) return true;
+  // 1. Direct explicit phrases
+  const directPhrases = [
+    'real person', 'real human', 'live agent', 'human agent', 'real agent',
+    'not ai', 'stop ai', 'human please', 'agent please',
+    'talk to human', 'talk to agent', 'speak to agent', 'connect to agent',
+    'connect with real agent', 'connect with agent', 'speak to human',
+    'talk to a person', 'talk to the real person', 'talk to a real person',
+    'can i talk to the real person', 'can i talk to a real person', 'can i speak to a person',
+    'real support', 'insan se baat', 'bande se baat', 'real banda',
+    'actual person', 'actual human', 'agent chahiye', 'human support',
+    'transfer to agent', 'transfer to human', 'connect with human'
+  ];
 
-  // Must have BOTH explicit human intent AND action together
-  const humanKeywords = ['human', 'real person', 'live person', 'live agent', 'representative', 'support person', 'insan', 'real banda'];
-  const actionKeywords = ['talk', 'speak', 'connect', 'transfer', 'switch'];
+  if (directPhrases.some(p => clean.includes(p))) return true;
+
+  // 2. Action + Target keywords combination
+  const humanKeywords = ['human', 'real agent', 'live agent', 'agent', 'person', 'someone', 'representative', 'rep', 'insan', 'banda'];
+  const actionKeywords = ['talk', 'speak', 'connect', 'transfer', 'switch', 'reach', 'chat with'];
 
   const hasAction = actionKeywords.some(a => clean.includes(a));
   const hasHuman = humanKeywords.some(h => clean.includes(h));

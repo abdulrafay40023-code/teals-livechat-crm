@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MessageSquare, Send,
   Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2,
@@ -409,7 +409,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       try {
         const res = await fetch(`/api/chat/message?conversationId=${targetId}`);
         if (res.ok) {
+          if (selectedConv?.id !== targetId) return;
           const data = await res.json();
+          if (selectedConv?.id !== targetId) return;
           if (Array.isArray(data.messages)) {
             setMessages(prev => {
               if (prev.length === data.messages.length) {
@@ -418,11 +420,11 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
               }
               const map = new Map<string, any>();
               prev.forEach(m => {
-                if (!m.conversation_id || m.conversation_id === targetId) {
-                  map.set(m.id, m);
+                if (m.conversation_id === targetId) {
+                  map.set(m.id, { ...m, conversation_id: targetId });
                 }
               });
-              data.messages.forEach((m: any) => map.set(m.id, m));
+              data.messages.forEach((m: any) => map.set(m.id, { ...m, conversation_id: targetId }));
               return sortTimelineMessages(Array.from(map.values()));
             });
           }
@@ -470,11 +472,11 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       setMessages(prev => {
         const map = new Map<string, any>();
         prev.forEach(m => {
-          if (!m.conversation_id || m.conversation_id === selectedConv.id) {
-            map.set(m.id, m);
+          if (m.conversation_id === selectedConv.id) {
+            map.set(m.id, { ...m, conversation_id: selectedConv.id });
           }
         });
-        (selectedConv.messages || []).forEach(m => map.set(m.id, m));
+        (selectedConv.messages || []).forEach(m => map.set(m.id, { ...m, conversation_id: selectedConv.id }));
         return sortTimelineMessages(Array.from(map.values()));
       });
     }
@@ -485,12 +487,26 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     }
   }, [selectedConv?.id, selectedConv?.messages?.length, selectedConv?.updated_at, onMarkRead]);
 
+  // Messages strictly belonging to the currently selected conversation (Zero leakage between chats!)
+  const displayMessages = useMemo(() => {
+    if (!selectedConv?.id) return [];
+    const targetId = selectedConv.id;
+    const map = new Map<string, any>();
+    (selectedConv.messages || []).forEach(m => map.set(m.id, { ...m, conversation_id: targetId }));
+    messages.forEach(m => {
+      if (!m.conversation_id || m.conversation_id === targetId) {
+        map.set(m.id, { ...m, conversation_id: targetId });
+      }
+    });
+    return sortTimelineMessages(Array.from(map.values()));
+  }, [selectedConv, messages]);
+
   useEffect(() => {
     // Only auto-scroll if user is near the bottom
     if (!isUserScrolledUp.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages]);
+  }, [displayMessages]);
 
   useEffect(() => {
     if (liveTypingPreview && !isUserScrolledUp.current) {
@@ -826,6 +842,11 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       <div
         key={conv.id}
         onClick={() => {
+          if (conv.messages && conv.messages.length > 0) {
+            setMessages(sortTimelineMessages(conv.messages.map(m => ({ ...m, conversation_id: conv.id }))));
+          } else {
+            setMessages([]);
+          }
           onSelectChat(conv.id);
           onMarkRead?.(conv.id);
         }}
@@ -1248,7 +1269,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                     isNeedsClaim && !isAdmin ? 'filter blur-sm select-none pointer-events-none' : ''
                   }`}
                 >
-                  {messages.map((m) => {
+                  {displayMessages.map((m) => {
                     const isVisitor = m.sender_type === 'visitor';
                     const isSystem = m.sender_type === 'system';
                     const isAi = m.sender_type === 'ai';

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
 import {
@@ -136,7 +136,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [liveCount, setLiveCount] = useState<number>(0);
   const [todayCount, setTodayCount] = useState<number>(0);
   const [totalUniqueCount, setTotalUniqueCount] = useState<number>(0);
-  const [chatCount, setChatCount] = useState<number>(0);
   const [pageViews, setPageViews] = useState<number>(0);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const soundEnabledRef = useRef<boolean>(true);
@@ -203,6 +202,30 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const unreadConversationsCount = computeUnread(conversations, readConvMap);
 
+  const userVisibleConversations = useMemo(() => {
+    let currentUser: { role?: string; email?: string; id?: string; full_name?: string } | null = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const rawSession = localStorage.getItem('teals_agent_session');
+        if (rawSession) currentUser = JSON.parse(rawSession);
+      } catch {}
+    }
+    const isAdm = checkIsAdmin(currentUser);
+    if (isAdm) return conversations;
+
+    return conversations.filter(c => {
+      const isMine = !!(
+        (c.assigned_agent_id && c.assigned_agent_id === currentUser?.id) ||
+        (c.assigned_agent_name && c.assigned_agent_name.toLowerCase() === currentUser?.full_name?.toLowerCase()) ||
+        (c.assigned_agent_email && c.assigned_agent_email.toLowerCase() === currentUser?.email?.toLowerCase())
+      );
+      const isNeedsHuman = !c.assigned_agent_id && !c.assigned_agent_name && (c.mode === 'human' || c.status === 'pending_agent');
+      return isMine || isNeedsHuman;
+    });
+  }, [conversations]);
+
+  const chatCount = userVisibleConversations.length;
+
   const markConversationAsRead = useCallback((convId: string) => {
     if (!convId) return;
 
@@ -243,15 +266,17 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [conversations]);
 
-  const knownSessionIds = useRef<Set<string>>(new Set());
+  const recentArrivalTimestamps = useRef<Map<string, number>>(new Map());
   const initialLoadDone = useRef(false);
   const prevLiveCountRef = useRef<number>(0);
 
   const triggerArrivalBeepIfNew = useCallback((key: string, source: string) => {
     if (!key) return;
-    if (!knownSessionIds.current.has(key)) {
+    const now = Date.now();
+    const lastTime = recentArrivalTimestamps.current.get(key) || 0;
+    if (now - lastTime > 15000) {
       console.log(`[SYNC_DEBUG] Triggering arrival alert for key: ${key} via ${source}`);
-      knownSessionIds.current.add(key);
+      recentArrivalTimestamps.current.set(key, now);
       if (soundEnabledRef.current) {
         initAndUnlockAudio().then(() => {
           playVisitorAlertSound();
@@ -276,7 +301,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const convsList: LiveConversation[] = Array.isArray(data.conversations) ? data.conversations : [];
       if (convsList.length === 0) {
         setConversations([]);
-        setChatCount(0);
         if (typeof window !== 'undefined') {
           try {
             Object.keys(localStorage).forEach(k => {
@@ -350,12 +374,16 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           };
         });
 
-        setChatCount(updatedList.length);
         return updatedList;
       });
 
       // Populate known sessions cache without noisy polling beeps
-      uniqueVisitors.forEach(v => knownSessionIds.current.add(v.id));
+      uniqueVisitors.forEach(v => {
+        const key = v.ip_address || v.id;
+        if (!recentArrivalTimestamps.current.has(key)) {
+          recentArrivalTimestamps.current.set(key, Date.now());
+        }
+      });
       initialLoadDone.current = true;
     } catch (err) {
       console.error('[SYNC_DEBUG] Poll sync error:', err);
@@ -415,8 +443,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           // Grace period: allow 30 seconds before allowing re-arrival beep for same session/IP
           // This prevents rapid navigation between website pages from repeatedly ringing arrival alerts
           setTimeout(() => {
-            if (sessionId) knownSessionIds.current.delete(sessionId);
-            if (sessionIp) knownSessionIds.current.delete(sessionIp);
+            if (sessionId) recentArrivalTimestamps.current.delete(sessionId);
+            if (sessionIp) recentArrivalTimestamps.current.delete(sessionIp);
           }, 30000);
 
           setLiveVisitors((prev) => {
@@ -537,40 +565,18 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             }
 
-            setChatCount(updated.length);
             return updated;
           });
         }
-
-        // Check if agent/admin is actively chatting inside this conversation right now
-        const isActivelyChattingInThisConv = (() => {
-          if (typeof window === 'undefined') return false;
-          // If tab is hidden or minimized, user is NOT actively seeing the screen!
-          if (document.hidden) return false;
-          // Must be on the chats page
-          if (!window.location.pathname.startsWith('/dashboard/chats')) return false;
-          try {
-            const raw = localStorage.getItem('teals_agent_session');
-            const email = raw ? JSON.parse(raw)?.email : '';
-            const key = (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
-            const selected = localStorage.getItem(key ? `teals_selected_chat_${key}` : 'teals_selected_chat_id');
-            return selected === conversation.id;
-          } catch {
-            return false;
-          }
-        })();
 
         // Beep logic (instant audio chimes)
         if (soundEnabledRef.current) {
           if (isHandoffEvent) {
             // Customer requested real human agent: 2-second urgent alert chime!
             playHandoffAlertSound();
-          } else if (isVisitorMsg && !isActivelyChattingInThisConv) {
-            // Normal message: only beep if human chat is active (claimed or pending) AND not actively looking at this conversation
-            const isHumanChat = conversation?.mode === 'human' || conversation?.status === 'pending_agent' || !!conversation?.assigned_agent_id;
-            if (isHumanChat && (isAdmin || isMyClaimedChat)) {
-              playChatMessageAlertSound();
-            }
+          } else if (isVisitorMsg) {
+            // Instant pop chime on ANY visitor message
+            playChatMessageAlertSound();
           }
         }
       })
@@ -600,7 +606,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const cId = (raw as Record<string, unknown>)?.conversationId as string;
         if (cId) {
           setConversations(prev => prev.filter(c => c.id !== cId));
-          setChatCount(prev => Math.max(0, prev - 1));
           setReadConvMap(rMap => {
             if (!rMap[cId]) return rMap;
             const next = { ...rMap };
@@ -674,13 +679,12 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       })
       .on('broadcast', { event: 'stats_reset' }, () => {
         console.log('[SYNC_DEBUG] WebSocket stats_reset event received.');
-        knownSessionIds.current.clear();
+        recentArrivalTimestamps.current.clear();
         setLiveVisitors([]);
         setConversations([]);
         setLiveCount(0);
         setTodayCount(0);
         setTotalUniqueCount(0);
-        setChatCount(0);
         setPageViews(0);
         if (typeof window !== 'undefined') {
           try {
@@ -694,13 +698,12 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       })
       .on('broadcast', { event: 'system_reset' }, () => {
         console.log('[SYNC_DEBUG] WebSocket system_reset event received.');
-        knownSessionIds.current.clear();
+        recentArrivalTimestamps.current.clear();
         setLiveVisitors([]);
         setConversations([]);
         setLiveCount(0);
         setTodayCount(0);
         setTotalUniqueCount(0);
-        setChatCount(0);
         setPageViews(0);
         if (typeof window !== 'undefined') {
           try {
@@ -739,7 +742,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const deleteConversation = useCallback(async (convId: string) => {
     if (!convId) return;
     setConversations(prev => prev.filter(c => c.id !== convId));
-    setChatCount(prev => Math.max(0, prev - 1));
     setReadConvMap(rMap => {
       const next = { ...rMap };
       delete next[convId];
@@ -757,7 +759,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   const resetAll = async () => {
-    knownSessionIds.current.clear();
+    recentArrivalTimestamps.current.clear();
     prevLiveCountRef.current = 0;     // reset so next arrival triggers beep
     initialLoadDone.current = false;  // reset so initial sync doesn't beep
     setUnreadCount(0);
@@ -772,7 +774,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setLiveCount(0);
     setTodayCount(0);
     setTotalUniqueCount(0);
-    setChatCount(0);
     setPageViews(0);
     await fetch('/api/admin/reset', { method: 'POST' });
     await refreshSync();

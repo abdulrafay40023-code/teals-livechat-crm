@@ -129,17 +129,21 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
-    // 2. Strict chronological order by timestamp
+    // 2. Primary sort: sequence number if present
+    const seqA = typeof a.seq === 'number' ? a.seq : null;
+    const seqB = typeof b.seq === 'number' ? b.seq : null;
+    if (seqA !== null && seqB !== null && seqA !== seqB) {
+      return seqA - seqB;
+    }
+
+    // 3. Strict chronological order by timestamp
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     if (timeA !== timeB) {
       return timeA - timeB;
     }
 
-    // 3. Fallback to sequence number if timestamps are identical
-    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
-    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    return seqA - seqB;
+    return (a.id || '').localeCompare(b.id || '');
   });
 
   return sorted.map((m, idx) => ({
