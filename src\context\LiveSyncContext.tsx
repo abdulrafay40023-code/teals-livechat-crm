@@ -368,8 +368,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
         if (session && session.id) {
           const dedupeKey = session.ip_address || session.id; // IP for count dedup
-          // Use session.id for BEEP — every fresh visit = new sessionId = beep
-          triggerArrivalBeepIfNew(session.id, 'WebSocket_visitor_arrival');
+          // Dedup by IP so page changes or refreshes do not re-chime
+          triggerArrivalBeepIfNew(dedupeKey, 'WebSocket_visitor_arrival');
 
           setLiveVisitors((prev) => {
             const map = new Map<string, LiveVisitor>();
@@ -557,8 +557,9 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             // Customer requested real human agent: 2-second urgent alert chime!
             playHandoffAlertSound();
           } else if (isVisitorMsg && !isActivelyChattingInThisConv) {
-            // Normal message: only beep if NOT currently actively chatting in this conversation!
-            if (isAdmin || isMyClaimedChat) {
+            // Normal message: only beep if human chat is active (claimed or pending) AND not actively looking at this conversation
+            const isHumanChat = conversation?.mode === 'human' || conversation?.status === 'pending_agent' || !!conversation?.assigned_agent_id;
+            if (isHumanChat && (isAdmin || isMyClaimedChat)) {
               playChatMessageAlertSound();
             }
           }
@@ -791,15 +792,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   }, []);
 
-  // Global listener for new visitors to play chime
+  // Keep liveCount ref updated without playing noisy phantom chimes
   useEffect(() => {
-    if (!initialLoadDone.current) return;
-    if (liveCount > prevLiveCountRef.current) {
-      // New visitor arrived! Beep.
-      if (soundEnabledRef.current) {
-        playVisitorAlertSound();
-      }
-    }
     prevLiveCountRef.current = liveCount;
   }, [liveCount]);
 

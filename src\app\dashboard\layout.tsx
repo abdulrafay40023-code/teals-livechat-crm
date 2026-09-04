@@ -7,7 +7,6 @@ import { Header } from '@/components/Header';
 import { EmbedCodeModal } from '@/components/EmbedCodeModal';
 import { supabase } from '@/lib/supabase';
 import { LiveSyncProvider, useLiveSync } from '@/context/LiveSyncContext';
-import { playHandoffAlertSound } from '@/lib/audio';
 
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -65,7 +64,6 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           const appData = await appRes.json();
           const count = appData.pendingAgents ? appData.pendingAgents.length : 0;
           if (prevPendingCountRef.current !== null && count > prevPendingCountRef.current) {
-            playHandoffAlertSound();
             if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
               new Notification('New Agent Approval Request', {
                 body: `You have ${count} pending agent registration(s) waiting for approval!`,

@@ -71,10 +71,16 @@ export default function ChatsPage() {
           setSelectedChatId(id || null);
           const key = getSelectedKey(currentAgent?.email);
           if (id) {
-            try { localStorage.setItem(key, id); } catch {}
+            try {
+              localStorage.setItem(key, id);
+              localStorage.setItem('teals_selected_chat_id', id);
+            } catch {}
             markConversationAsRead(id);
           } else {
-            try { localStorage.removeItem(key); } catch {}
+            try {
+              localStorage.removeItem(key);
+              localStorage.removeItem('teals_selected_chat_id');
+            } catch {}
           }
         }}
         onClaimSuccess={handleClaimSuccess}
