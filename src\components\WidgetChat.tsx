@@ -144,14 +144,6 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           try {
             localStorage.setItem('teals_visitor_conv_list', JSON.stringify(mapped));
           } catch {}
-        } else {
-          setSavedConversations([]);
-          setHasSubmittedLead(false);
-          setViewingHistory(false);
-          try {
-            localStorage.removeItem('teals_visitor_conv_list');
-            localStorage.removeItem('teals_lead_submitted');
-          } catch {}
         }
       }
     } catch {}
@@ -163,8 +155,6 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       const savedName = localStorage.getItem('teals_lead_name');
       const savedEmail = localStorage.getItem('teals_lead_email');
       const submitted = localStorage.getItem('teals_lead_submitted');
-      if (savedName) setUserName(savedName);
-      if (savedEmail) setUserEmail(savedEmail);
 
       const rawConvList = localStorage.getItem('teals_visitor_conv_list');
       const parsedConvs: SavedConvSummary[] = rawConvList ? JSON.parse(rawConvList) : [];
@@ -173,13 +163,20 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       const hasRealConversations = parsedConvs.length > 0 && parsedConvs.some(c => c.lastMessage && c.lastMessage !== DEFAULT_GREETING);
 
       if (savedName && savedEmail && submitted === 'true' && hasRealConversations) {
+        setUserName(savedName);
+        setUserEmail(savedEmail);
         setHasSubmittedLead(true);
         setViewingHistory(false);
       } else {
+        // Start fresh with clean empty form fields
+        setUserName('');
+        setUserEmail('');
         setHasSubmittedLead(false);
         setViewingHistory(false);
       }
     } catch {
+      setUserName('');
+      setUserEmail('');
       setHasSubmittedLead(false);
       setViewingHistory(false);
     }
