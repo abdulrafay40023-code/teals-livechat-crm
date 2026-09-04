@@ -199,6 +199,19 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const lockedUnread = lockedList.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
   const claimedUnread = claimedList.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
 
+  // Unseen locked chats count (wahan seen krey admin/agent tu gayab uskey pass sy)
+  const unseenLockedCount = lockedList.filter(c => {
+    if (c.id === selectedChatId) return false;
+    const readVal = readConvMap?.[c.id];
+    if (!readVal) return true; // Never opened/seen yet
+    const visitorMsgs = (c.messages || []).filter(m => m.sender_type === 'visitor');
+    if (visitorMsgs.length === 0) return false;
+    const lastMsg = visitorMsgs[visitorMsgs.length - 1];
+    let savedId = readVal;
+    if (readVal.includes('__')) savedId = readVal.split('__')[0];
+    return savedId !== lastMsg.id && savedId !== 'all';
+  }).length;
+
   const handleDeleteChat = async (id: string) => {
     if (!window.confirm('Are you sure you want to permanently delete this chat?')) return;
     if (selectedChatId === id) {
@@ -588,6 +601,13 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
           setMessages(sortTimelineMessages(data.conversation.messages));
         }
         onClaimSuccess();
+
+        // Automatically redirect to the claimed chat's section (Chat 1 or Chat 2) and focus input
+        const targetTab = getChatNumber(selectedConv) === 2 ? 'chat2' : 'chat1';
+        setInboxTab(targetTab);
+        setTimeout(() => {
+          agentInputRef.current?.focus();
+        }, 100);
       }
     } catch {
       setClaimError('Network error while claiming chat.');
@@ -841,9 +861,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
             </span>
           </div>
 
-          {/* 4 Clean Filter Tabs: Chat 1, Chat 2, Locked, Claimed */}
-          <div className="grid grid-cols-4 gap-1 p-1.5 bg-[#080d1a] border-b border-dark-border">
-            {/* 1. Chat 1 Tab */}
+          {/* Tabs Grid: 4 tabs for Admin, 3 tabs for Regular Agent */}
+          <div className={`grid ${isAdmin ? 'grid-cols-4' : 'grid-cols-3'} gap-1 p-1.5 bg-[#080d1a] border-b border-dark-border`}>
+            {/* 1. Chat 1 (Old) Tab */}
             <button
               type="button"
               onClick={() => setInboxTab('chat1')}
@@ -853,7 +873,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                   : 'text-dark-muted hover:text-white hover:bg-dark-surface'
               }`}
             >
-              <span className="text-[11px] truncate">Chat 1</span>
+              <span className="text-[11px] truncate">Chat 1 (Old)</span>
               {chat1Unread > 0 ? (
                 <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
                   {chat1Unread}
@@ -865,7 +885,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
               )}
             </button>
 
-            {/* 2. Chat 2 Tab */}
+            {/* 2. Chat 2 (New) Tab */}
             <button
               type="button"
               onClick={() => setInboxTab('chat2')}
@@ -875,7 +895,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                   : 'text-dark-muted hover:text-white hover:bg-dark-surface'
               }`}
             >
-              <span className="text-[11px] truncate">Chat 2</span>
+              <span className="text-[11px] truncate">Chat 2 (New)</span>
               {chat2Unread > 0 ? (
                 <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
                   {chat2Unread}
@@ -899,39 +919,41 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
             >
               <Lock className="w-3 h-3 text-amber-400 flex-shrink-0" />
               <span className="text-[11px] truncate">Locked</span>
-              {lockedList.length > 0 ? (
+              {unseenLockedCount > 0 ? (
                 <span className="min-w-[17px] h-[17px] px-1 bg-amber-500 text-dark-bg text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-amber-500/50">
-                  {lockedList.length}
+                  {unseenLockedCount}
                 </span>
               ) : (
                 <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
-                  0
+                  {lockedList.length}
                 </span>
               )}
             </button>
 
-            {/* 4. Claimed Tab */}
-            <button
-              type="button"
-              onClick={() => setInboxTab('claimed')}
-              className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
-                inboxTab === 'claimed'
-                  ? 'bg-emerald-600 text-white shadow-sm'
-                  : 'text-dark-muted hover:text-white hover:bg-dark-surface'
-              }`}
-            >
-              <UserCheck className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-              <span className="text-[11px] truncate">Claimed</span>
-              {claimedUnread > 0 ? (
-                <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
-                  {claimedUnread}
-                </span>
-              ) : (
-                <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
-                  {claimedList.length}
-                </span>
-              )}
-            </button>
+            {/* 4. Claimed Tab (Admin Only) */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setInboxTab('claimed')}
+                className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                  inboxTab === 'claimed'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-dark-muted hover:text-white hover:bg-dark-surface'
+                }`}
+              >
+                <UserCheck className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                <span className="text-[11px] truncate">Claimed</span>
+                {claimedUnread > 0 ? (
+                  <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
+                    {claimedUnread}
+                  </span>
+                ) : (
+                  <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
+                    {claimedList.length}
+                  </span>
+                )}
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-dark-border/40">
