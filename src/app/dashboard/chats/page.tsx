@@ -91,13 +91,40 @@ export default function ChatsPage() {
     return savedId !== lastMsg.id && savedId !== 'all';
   };
 
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const isAdmin = currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
+
+  // Working agents rule: Only visible when visitor requested a real human agent OR already claimed by this agent
+  const isConvVisibleToAgent = (c: any) => {
+    if (isAdmin) return true;
+
+    const isMine = !!(
+      (c.assigned_agent_id && (
+        c.assigned_agent_id === currentAgent.id ||
+        c.assigned_agent_id.toLowerCase() === (currentAgent.id || '').toLowerCase()
+      )) ||
+      (c.assigned_agent_name && (
+        c.assigned_agent_name.toLowerCase().trim() === (currentAgent.full_name || '').toLowerCase().trim()
+      )) ||
+      (c.assigned_agent_email && (
+        c.assigned_agent_email.toLowerCase().trim() === (currentAgent.email || '').toLowerCase().trim()
+      ))
+    );
+    if (isMine) return true;
+
+    const isNeedsHuman = !c.assigned_agent_id && !c.assigned_agent_name && (c.mode === 'human' || c.status === 'pending_agent');
+    return isNeedsHuman;
+  };
+
+  const agentConversations = conversations.filter(isConvVisibleToAgent);
+
   const getWebsiteStats = (slug: string) => {
-    const list = conversations.filter(c => (c.property_slug || 'amz-solutions-hub') === slug);
+    const list = agentConversations.filter(c => (c.property_slug || 'amz-solutions-hub') === slug);
     const unread = list.filter(convHasUnread).length;
     return { count: list.length, unread };
   };
 
-  const filteredConversations = selectedWebsiteSlug ? conversations.filter(c => {
+  const filteredConversations = selectedWebsiteSlug ? agentConversations.filter(c => {
     return (c.property_slug || 'amz-solutions-hub') === selectedWebsiteSlug;
   }) : [];
 

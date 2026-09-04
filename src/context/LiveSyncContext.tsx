@@ -272,6 +272,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const triggerArrivalBeepIfNew = useCallback((key: string, source: string) => {
     if (!key) return;
+
+    let currentUser: { role?: string; email?: string } | null = null;
+    try {
+      const rawSession = localStorage.getItem('teals_agent_session');
+      if (rawSession) currentUser = JSON.parse(rawSession);
+    } catch {}
+    // Working agents do NOT get visitor arrival beeps (only admins monitor live arrivals)
+    if (!checkIsAdmin(currentUser)) return;
+
     const now = Date.now();
     const lastTime = recentArrivalTimestamps.current.get(key) || 0;
     if (now - lastTime > 15000) {
@@ -470,8 +479,16 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         } catch {}
 
         const isAdmin = checkIsAdmin(currentUser);
-        const isMyClaimedChat = conversation && conversation.assigned_agent_id === currentUser?.id;
-        const isHandoffEvent = isHandoffRequested || conversation?.status === 'pending_agent';
+        const currentFullName = ((currentUser as any)?.full_name || '').toLowerCase().trim();
+        const currentEmail = (currentUser?.email || '').toLowerCase().trim();
+        const currentId = (currentUser?.id || '').toLowerCase().trim();
+
+        const isMyClaimedChat = !!(conversation && (
+          (conversation.assigned_agent_id && conversation.assigned_agent_id.toLowerCase().trim() === currentId) ||
+          (conversation.assigned_agent_name && conversation.assigned_agent_name.toLowerCase().trim() === currentFullName) ||
+          (conversation.assigned_agent_email && conversation.assigned_agent_email.toLowerCase().trim() === currentEmail)
+        ));
+        const isHandoffEvent = isHandoffRequested || conversation?.status === 'pending_agent' || conversation?.mode === 'human';
         const isVisitorMsg = message && message.sender_type === 'visitor';
 
         // When a new visitor message arrives, immediately invalidate read map for this conversation
@@ -572,11 +589,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         // Beep logic (instant audio chimes)
         if (soundEnabledRef.current) {
           if (isHandoffEvent) {
-            // Customer requested real human agent: 2-second urgent alert chime!
+            // Customer requested real human agent: 2-second urgent alert chime (both admin and working agents hear this!)
             playHandoffAlertSound();
           } else if (isVisitorMsg) {
-            // Instant pop chime on ANY visitor message
-            playChatMessageAlertSound();
+            // Working agents only hear visitor message chime if it is their claimed chat!
+            if (isAdmin || isMyClaimedChat) {
+              playChatMessageAlertSound();
+            }
           }
         }
       })
