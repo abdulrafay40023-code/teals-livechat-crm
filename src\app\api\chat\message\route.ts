@@ -119,7 +119,7 @@ export async function POST(req: NextRequest) {
             conversation_id: convId,
             sender_type: 'ai',
             sender_name: `${siteConfig.shortName} AI Assistant`,
-            content: `Hey! Welcome to ${siteConfig.name}. How can we assist you with our services today?`,
+            content: 'Hey how can i help you ?',
             is_whisper: false,
             seq: 1,
             created_at: '1970-01-01T00:00:00.000Z'

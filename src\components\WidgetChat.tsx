@@ -16,7 +16,7 @@ interface WidgetChatProps {
   referrerUrl?: string;
 }
 
-const DEFAULT_GREETING = 'Hey! How can I help you today?';
+const DEFAULT_GREETING = 'Hey how can i help you ?';
 
 interface SavedConvSummary {
   id: string;
@@ -43,8 +43,8 @@ const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING,
     const isGreet = m.sender_type === 'ai' && (
       m.id === 'init-greet' || 
       m.id?.startsWith?.('init-greet') || 
-      (m.content || '').includes('Hey! How can I help') || 
-      (m.content || '').includes('Welcome to')
+      (m.content || '').toLowerCase().includes('how can i help') || 
+      (m.content || '').toLowerCase().includes('welcome to')
     );
     if (isGreet) {
       if (seenGreet) return;
@@ -127,7 +127,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   referrerUrl
 }) => {
   const siteConfig = getWebsiteConfig(propertySlug);
-  const siteGreeting = `Hey! Welcome to ${siteConfig.name}. How can we assist you with our services today?`;
+  const siteGreeting = 'Hey how can i help you ?';
   const siteAiName = `${siteConfig.shortName} AI Assistant`;
 
   const [isOpen, setIsOpen] = useState(false);
@@ -343,8 +343,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               {
                 id: 'init-greet',
                 sender_type: 'ai',
-                sender_name: 'Teals AI Agent',
-                content: DEFAULT_GREETING,
+                sender_name: siteAiName,
+                content: siteGreeting,
                 seq: 1,
                 status: 'read',
                 created_at: '1970-01-01T00:00:00.000Z'
@@ -1357,8 +1357,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       handleSend(e);
                     }
                   }}
-                  rows={1}
-                  placeholder="Ask something about Teals CRM (Enter to send)..."
+                  placeholder="Type your message here (Enter to send)..."
                   className="flex-1 bg-[#131b2e] border border-gray-700 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 resize-none overflow-y-auto whitespace-pre-wrap break-words leading-relaxed transition-[height] duration-75"
                   style={{ minHeight: '38px', maxHeight: '130px' }}
                 />

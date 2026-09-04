@@ -45,7 +45,7 @@ export async function generateAIChatResponse({
   // 2. Greetings (expanded — catch "hey bro", "hello there", "salam", etc.)
   if (/^(hey|hi|hello|heyy|salam|aoa|hola|good morning|good afternoon|good evening|hey bro|hi there|hello there|heyy bro|what'?s up|sup|yo)(\s.*)?$/i.test(lower)) {
     return {
-      text: `Hey${visitorName ? ' ' + visitorName : ''}! Welcome to ${siteConfig.name}. How can I assist you with our services today?`,
+      text: 'Hey how can i help you ?',
       handoffRequired: false
     };
   }
@@ -112,7 +112,7 @@ export async function generateAIChatResponse({
 
   // Fallback: grounded answer without forcing handoff
   return {
-    text: siteConfig.outOfScopeReply || `Welcome to ${siteConfig.name}! How can we assist you with our services today?`,
+    text: siteConfig.outOfScopeReply || 'Hey how can i help you ?',
     handoffRequired: false
   };
 }
