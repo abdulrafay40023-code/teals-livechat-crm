@@ -42,10 +42,13 @@ export async function generateAIChatResponse({
     };
   }
 
+  const rawName = (visitorName || '').trim();
+  const cleanName = rawName && rawName.toLowerCase() !== 'visitor' && rawName.toLowerCase() !== 'you' ? rawName : null;
+
   // 2. Greetings (expanded — catch "hey bro", "hello there", "salam", etc.)
   if (/^(hey|hi|hello|heyy|salam|aoa|hola|good morning|good afternoon|good evening|hey bro|hi there|hello there|heyy bro|what'?s up|sup|yo)(\s.*)?$/i.test(lower)) {
     return {
-      text: 'Hey how can i help you ?',
+      text: cleanName ? `Hey ${cleanName}, how can i help you today ?` : 'Hey, how can i help you today ?',
       handoffRequired: false
     };
   }
@@ -66,7 +69,7 @@ export async function generateAIChatResponse({
     };
   }
 
-  const systemPrompt = siteConfig.systemPrompt;
+  const systemPrompt = siteConfig.systemPrompt + (cleanName ? `\nThe visitor's name is "${cleanName}". Address them warmly by name when appropriate.` : '');
   const siteGenAI = new GoogleGenerativeAI(siteConfig.geminiApiKey || defaultApiKey);
 
   // Valid Gemini model names - optimized for speed (gemini-2.0-flash responds sub-800ms)
