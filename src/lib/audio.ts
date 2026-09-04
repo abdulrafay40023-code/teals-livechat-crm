@@ -39,18 +39,29 @@ function playTone(c, freq, duration, volume, delay) {
 
 function doPlayArrival() {
   var c = getCtx(); if (!c || c.state !== 'running') return;
-  playTone(c, 523.25, 0.12, 0.7, 0.00); playTone(c, 659.25, 0.12, 0.7, 0.12);
-  playTone(c, 783.99, 0.12, 0.7, 0.24); playTone(c, 1046.50, 0.35, 0.85, 0.36);
+  playTone(c, 587.33, 0.14, 0.55, 0.00); // D5
+  playTone(c, 880.00, 0.30, 0.60, 0.14); // A5
 }
+
 function doPlayMessage() {
   var c = getCtx(); if (!c || c.state !== 'running') return;
-  playTone(c, 880, 0.14, 0.65, 0.00); playTone(c, 1108, 0.30, 0.65, 0.14);
+  // Instagram / WhatsApp double-pop
+  playTone(c, 784.00, 0.08, 0.55, 0.00);  // Pop 1
+  playTone(c, 1046.50, 0.20, 0.50, 0.08); // Pop 2
 }
+
 function doPlayHandoff() {
   var c = getCtx(); if (!c || c.state !== 'running') return;
-  playTone(c, 440, 0.09, 0.7, 0.00); playTone(c, 554, 0.09, 0.7, 0.09);
-  playTone(c, 659, 0.09, 0.75, 0.18); playTone(c, 880, 0.09, 0.8, 0.27);
-  playTone(c, 1108, 0.38, 0.9, 0.36);
+  // 2-second rich alert chime sequence for human handoff
+  playTone(c, 523.25, 0.14, 0.70, 0.00); // C5
+  playTone(c, 659.25, 0.14, 0.70, 0.14); // E5
+  playTone(c, 783.99, 0.14, 0.75, 0.28); // G5
+  playTone(c, 1046.50, 0.40, 0.85, 0.42); // C6
+
+  // Second wave harmonic resonance extending to ~2.0s
+  playTone(c, 880.00, 0.20, 0.60, 0.85);  // A5
+  playTone(c, 1174.66, 0.55, 0.70, 1.05); // D6
+  playTone(c, 1318.51, 0.75, 0.50, 1.25); // E6
 }
 
 export async function flushPending() {
@@ -95,14 +106,24 @@ if (typeof window !== 'undefined') {
 }
 
 export async function initAndUnlockAudio() {
-  return false;
+  var c = getCtx();
+  if (!c) return false;
+  if (c.state !== 'running') {
+    try {
+      await c.resume();
+    } catch (e) {}
+  }
+  return c.state === 'running';
 }
+
 export async function playVisitorAlertSound() {
-  // Beeps disabled
+  queueOrPlay(doPlayArrival);
 }
+
 export async function playChatMessageAlertSound() {
-  // Beeps disabled
+  queueOrPlay(doPlayMessage);
 }
+
 export async function playHandoffAlertSound() {
-  // Beeps disabled
+  queueOrPlay(doPlayHandoff);
 }

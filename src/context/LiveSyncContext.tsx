@@ -526,17 +526,34 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           });
         }
 
-        // Beep logic — simplified (queueOrPlay handles AudioContext internally)
+        // Check if agent/admin is actively chatting inside this conversation right now
+        const isActivelyChattingInThisConv = (() => {
+          if (typeof window === 'undefined') return false;
+          // If tab is hidden or minimized, user is NOT actively seeing the screen!
+          if (document.hidden) return false;
+          // Must be on the chats page
+          if (!window.location.pathname.startsWith('/dashboard/chats')) return false;
+          try {
+            const raw = localStorage.getItem('teals_agent_session');
+            const email = raw ? JSON.parse(raw)?.email : '';
+            const key = (email || '').toLowerCase().replace(/[^a-z0-9]/g, '_');
+            const selected = localStorage.getItem(key ? `teals_selected_chat_${key}` : 'teals_selected_chat_id');
+            return selected === conversation.id;
+          } catch {
+            return false;
+          }
+        })();
+
+        // Beep logic (instant audio chimes)
         if (soundEnabledRef.current) {
           if (isHandoffEvent) {
-            // Handoff: both admin AND agent get the 5-tone chime
+            // Customer requested real human agent: 2-second urgent alert chime!
             playHandoffAlertSound();
-          } else if (isAdmin && isVisitorMsg) {
-            // Admin: beep on any visitor message
-            playChatMessageAlertSound();
-          } else if (!isAdmin && isMyClaimedChat && isVisitorMsg) {
-            // Agent: beep only on their own claimed chat
-            playChatMessageAlertSound();
+          } else if (isVisitorMsg && !isActivelyChattingInThisConv) {
+            // Normal message: only beep if NOT currently actively chatting in this conversation!
+            if (isAdmin || isMyClaimedChat) {
+              playChatMessageAlertSound();
+            }
           }
         }
       })
