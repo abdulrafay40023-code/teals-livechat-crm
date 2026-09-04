@@ -1,57 +1,73 @@
 'use client';
 
-let ctx = null;
-let pendingBeeps = [];
+let ctx: AudioContext | null = null;
+let pendingBeeps: Array<{ fn: () => void; timestamp: number }> = [];
 let flushing = false;
 
-function getCtx() {
+let lastPlayedTone = '';
+let lastPlayedAt = 0;
+
+function canPlay(toneType: string, minIntervalMs = 600) {
+  const now = Date.now();
+  if (toneType === lastPlayedTone && now - lastPlayedAt < minIntervalMs) {
+    return false;
+  }
+  lastPlayedTone = toneType;
+  lastPlayedAt = now;
+  return true;
+}
+
+function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!ctx) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      var AC = window.AudioContext || (window as any).webkitAudioContext;
+      const AC = window.AudioContext || (window as any).webkitAudioContext;
       ctx = new AC();
-    } catch (e) { return null; }
+    } catch { return null; }
   }
   return ctx;
 }
 
 async function ensureRunning() {
-  var c = getCtx();
+  const c = getCtx();
   if (!c) return false;
   if (c.state === 'running') return true;
-  try { await c.resume(); return c.state === 'running'; } catch (e) { return false; }
+  try { await c.resume(); return (c.state as string) === 'running'; } catch { return false; }
 }
 
-function playTone(c, freq, duration, volume, delay) {
+function playTone(c: AudioContext, freq: number, duration: number, volume: number, delay: number) {
   try {
-    var osc = c.createOscillator();
-    var gain = c.createGain();
+    const osc = c.createOscillator();
+    const gain = c.createGain();
     osc.connect(gain); gain.connect(c.destination);
-    var start = c.currentTime + delay;
+    const start = c.currentTime + delay;
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, start);
     gain.gain.setValueAtTime(volume, start);
     gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
     osc.start(start); osc.stop(start + duration + 0.05);
-  } catch (e) {}
+  } catch {}
 }
 
 function doPlayArrival() {
-  var c = getCtx(); if (!c || c.state !== 'running') return;
+  if (!canPlay('arrival', 1000)) return;
+  const c = getCtx(); if (!c || c.state !== 'running') return;
   playTone(c, 587.33, 0.14, 0.55, 0.00); // D5
   playTone(c, 880.00, 0.30, 0.60, 0.14); // A5
 }
 
 function doPlayMessage() {
-  var c = getCtx(); if (!c || c.state !== 'running') return;
+  if (!canPlay('message', 600)) return;
+  const c = getCtx(); if (!c || c.state !== 'running') return;
   // Instagram / WhatsApp double-pop
   playTone(c, 784.00, 0.08, 0.55, 0.00);  // Pop 1
   playTone(c, 1046.50, 0.20, 0.50, 0.08); // Pop 2
 }
 
 function doPlayHandoff() {
-  var c = getCtx(); if (!c || c.state !== 'running') return;
+  if (!canPlay('handoff', 1500)) return;
+  const c = getCtx(); if (!c || c.state !== 'running') return;
   // 2-second rich alert chime sequence for human handoff
   playTone(c, 523.25, 0.14, 0.70, 0.00); // C5
   playTone(c, 659.25, 0.14, 0.70, 0.14); // E5
@@ -67,21 +83,26 @@ function doPlayHandoff() {
 export async function flushPending() {
   if (flushing) return; flushing = true;
   try {
-    var ok = await ensureRunning();
+    const ok = await ensureRunning();
     if (ok && pendingBeeps.length > 0) {
-      var last = pendingBeeps[pendingBeeps.length - 1];
-      pendingBeeps = []; last();
+      const now = Date.now();
+      // Drop any stale beeps older than 2000ms
+      const valid = pendingBeeps.filter(b => now - b.timestamp <= 2000);
+      pendingBeeps = [];
+      if (valid.length > 0) {
+        const last = valid[valid.length - 1];
+        last.fn();
+      }
     }
   } finally { flushing = false; }
 }
 
-function queueOrPlay(fn) {
+function queueOrPlay(fn: () => void) {
   getCtx();
   if (ctx && ctx.state === 'running') {
     fn(); // play directly
   } else {
-    pendingBeeps.push(fn);
-    // Try to resume immediately (works if ctx was previously running - e.g. after tab switch)
+    pendingBeeps.push({ fn, timestamp: Date.now() });
     ensureRunning().then(function(ok) {
       if (ok) flushPending();
     });

@@ -51,7 +51,12 @@ export async function POST(req: NextRequest) {
     };
 
     if (!conv.messages) conv.messages = [];
-    conv.messages = conv.messages.filter(m => !(m.sender_type === 'system' && (m.content.includes('has claimed and joined') || m.content.includes('transferred to Live Support Agent'))));
+    conv.messages = conv.messages.filter(m => !(m.sender_type === 'system' && (
+      m.content.includes('has claimed and joined') ||
+      m.content.includes('transferred to Live Support Agent') ||
+      m.content.includes('Transferring to a live support agent') ||
+      m.content.includes('taken over')
+    )));
     conv.messages.push(sysMsg);
 
     await granularStore.saveConversation(conv);

@@ -244,10 +244,43 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
 
 const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?: string; sender_type?: string; content?: string }>(msgs: T[]): T[] => {
   const map = new Map<string, T>();
+  
+  const hasClaimOrJoined = msgs.some(m => m && m.sender_type === 'system' && (
+    m.content?.includes('has claimed and joined') ||
+    m.content?.includes('transferred to Live Support Agent') ||
+    m.content?.includes('taken over')
+  ));
+
   msgs.forEach(m => {
     if (!m || !m.id) return;
+    // If an agent has claimed/joined, omit temporary handoff messages
+    if (hasClaimOrJoined && m.sender_type === 'system' && m.content?.includes('Transferring to a live support agent')) {
+      return;
+    }
     map.set(m.id, m);
   });
+
+  // Deduplicate multiple claim/transfer system messages: keep only the newest one
+  const claimMsgs = Array.from(map.values()).filter(m => m.sender_type === 'system' && (
+    m.content?.includes('has claimed and joined') ||
+    m.content?.includes('transferred to Live Support Agent')
+  ));
+  if (claimMsgs.length > 1) {
+    const sortedClaims = claimMsgs.sort((a, b) => {
+      const sA = typeof a.seq === 'number' ? a.seq : 0;
+      const sB = typeof b.seq === 'number' ? b.seq : 0;
+      if (sA !== sB) return sB - sA;
+      const tA = new Date(a.created_at || 0).getTime();
+      const tB = new Date(b.created_at || 0).getTime();
+      return tB - tA;
+    });
+    for (let i = 1; i < sortedClaims.length; i++) {
+      if (sortedClaims[i].id) {
+        map.delete(sortedClaims[i].id!);
+      }
+    }
+  }
+
   const list = Array.from(map.values());
   return list.sort((a, b) => {
     const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
@@ -255,15 +288,21 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
+    // Primary sort: sequence number
+    const seqA = typeof a.seq === 'number' ? a.seq : null;
+    const seqB = typeof b.seq === 'number' ? b.seq : null;
+    if (seqA !== null && seqB !== null && seqA !== seqB) {
+      return seqA - seqB;
+    }
+
+    // Secondary sort: timestamp
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     if (timeA !== timeB) {
       return timeA - timeB;
     }
 
-    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
-    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    return seqA - seqB;
+    return (a.id || '').localeCompare(b.id || '');
   });
 };
 
@@ -558,6 +597,14 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       created_at: nowIso
     };
 
+    const isSystemClaimOrHandoff = (m: any) =>
+      m.sender_type === 'system' && (
+        m.content?.includes('has claimed and joined') ||
+        m.content?.includes('transferred to Live Support Agent') ||
+        m.content?.includes('Transferring to a live support agent') ||
+        m.content?.includes('taken over')
+      );
+
     const updatedConv = {
       ...selectedConv,
       mode: 'human' as const,
@@ -565,7 +612,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       assigned_agent_id: agentId,
       assigned_agent_name: agentName,
       assigned_agent_email: agentEmail,
-      messages: sortTimelineMessages([...messages.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))), sysMsg])
+      messages: sortTimelineMessages([...messages.filter(m => !isSystemClaimOrHandoff(m)), sysMsg])
     };
 
     // Immediate WebSocket broadcast to Visitor Widget and all Dashboards (sub-5ms)
@@ -580,7 +627,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
       }
     });
 
-    setMessages((prev) => sortTimelineMessages([...prev.filter(m => !(m.sender_type === 'system' && m.content?.includes('has claimed and joined'))), sysMsg]));
+    setMessages((prev) => sortTimelineMessages([...prev.filter(m => !isSystemClaimOrHandoff(m)), sysMsg]));
 
     try {
       const res = await fetch('/api/agent/claim-chat', {

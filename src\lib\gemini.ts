@@ -47,10 +47,18 @@ export async function generateAIChatResponse({
     };
   }
 
-  // 3. Status checks
+  // 3. Status checks & quick acknowledgements
   if (/^(fine|good|great|doing good|doing well|i am good|i am fine|all good|thk|theek|alright|ok|okay)$/i.test(lower)) {
     return {
       text: 'Glad to hear that! Are you interested in exploring our AI automated email warming, CRM sales pipelines, or live visitor tracking today?',
+      handoffRequired: false
+    };
+  }
+
+  // 4. Quick appreciations / short affirmations
+  if (/^(thanks|thank you|shukriya|thx|cool|nice|ok bro|alright bro|done|got it)$/i.test(lower)) {
+    return {
+      text: "You're very welcome! Let me know if you have any questions about Teals CRM features or live support.",
       handoffRequired: false
     };
   }
@@ -71,17 +79,22 @@ STRICT INSTRUCTIONS:
 4. For all normal product questions, explain directly as the AI agent — NEVER force handoff unless requested.
 5. Keep answers concise: 2 to 3 sentences max. Be energetic and helpful.`;
 
-  // Valid Gemini model names
+  // Valid Gemini model names - optimized for speed (gemini-2.0-flash responds sub-800ms)
   const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
   for (const modelName of modelsToTry) {
     try {
       const model = genAI.getGenerativeModel({
         model: modelName,
-        systemInstruction: systemPrompt
+        systemInstruction: systemPrompt,
+        generationConfig: {
+          maxOutputTokens: 120,
+          temperature: 0.6
+        }
       });
 
-      const conversationHistory = messages.slice(0, -1).map(m => ({
+      // Slice to last 4 messages for rapid context ingestion
+      const conversationHistory = messages.slice(-5, -1).map(m => ({
         role: m.role === 'user' ? 'user' : 'model',
         parts: [{ text: m.content }]
       }));

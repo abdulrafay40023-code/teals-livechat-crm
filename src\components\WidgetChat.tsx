@@ -25,9 +25,19 @@ interface SavedConvSummary {
 const dedupeMessages = (incomingList: any[]) => {
   const map = new Map<string, any>();
   let seenGreet = false;
+
+  const hasClaimOrJoined = incomingList.some(m => m && m.sender_type === 'system' && (
+    m.content?.includes('has claimed and joined') ||
+    m.content?.includes('transferred to Live Support Agent') ||
+    m.content?.includes('taken over')
+  ));
   
   incomingList.forEach(m => {
     if (!m) return;
+    // If an agent has claimed/joined, omit temporary handoff messages
+    if (hasClaimOrJoined && m.sender_type === 'system' && m.content?.includes('Transferring to a live support agent')) {
+      return;
+    }
     const isGreet = m.sender_type === 'ai' && (m.id === 'init-greet' || m.id?.startsWith?.('init-greet') || m.content?.trim() === DEFAULT_GREETING.trim());
     if (isGreet) {
       if (seenGreet) return;
@@ -56,6 +66,27 @@ const dedupeMessages = (incomingList: any[]) => {
     });
   }
 
+  // Deduplicate multiple claim/transfer system messages: keep only the newest one
+  const claimMsgs = Array.from(map.values()).filter(m => m.sender_type === 'system' && (
+    m.content?.includes('has claimed and joined') ||
+    m.content?.includes('transferred to Live Support Agent')
+  ));
+  if (claimMsgs.length > 1) {
+    const sortedClaims = claimMsgs.sort((a, b) => {
+      const sA = typeof a.seq === 'number' ? a.seq : 0;
+      const sB = typeof b.seq === 'number' ? b.seq : 0;
+      if (sA !== sB) return sB - sA;
+      const tA = new Date(a.created_at || 0).getTime();
+      const tB = new Date(b.created_at || 0).getTime();
+      return tB - tA;
+    });
+    for (let i = 1; i < sortedClaims.length; i++) {
+      if (sortedClaims[i].id) {
+        map.delete(sortedClaims[i].id);
+      }
+    }
+  }
+
   const result = Array.from(map.values());
   return result.sort((a, b) => {
     const isAiGreetA = a.id === 'init-greet';
@@ -63,15 +94,21 @@ const dedupeMessages = (incomingList: any[]) => {
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
+    // Primary sort: sequence number if both have valid distinct seq
+    const seqA = typeof a.seq === 'number' ? a.seq : null;
+    const seqB = typeof b.seq === 'number' ? b.seq : null;
+    if (seqA !== null && seqB !== null && seqA !== seqB) {
+      return seqA - seqB;
+    }
+
+    // Secondary sort: timestamp
     const timeA = new Date(a.created_at || 0).getTime();
     const timeB = new Date(b.created_at || 0).getTime();
     if (timeA !== timeB) {
       return timeA - timeB;
     }
 
-    const seqA = typeof a.seq === 'number' ? a.seq : 999999;
-    const seqB = typeof b.seq === 'number' ? b.seq : 999999;
-    return seqA - seqB;
+    return (a.id || '').localeCompare(b.id || '');
   });
 };
 
@@ -450,7 +487,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           setAgentTypingText(null);
 
           if (conv?.messages && Array.isArray(conv.messages)) {
-            setMessages(prev => dedupeMessages([...prev, ...conv.messages!]));
+            setMessages(prev => {
+              const unsavedVisitor = prev.filter(p => p.sender_type === 'visitor' && !conv.messages!.some(m => m.id === p.id || m.content === p.content));
+              return dedupeMessages([...conv.messages!, ...unsavedVisitor]);
+            });
           }
         }
       })
@@ -482,9 +522,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           }
 
           if (data.conversation?.messages && data.conversation.messages.length > 0) {
-            setMessages(prev => dedupeMessages([...prev, ...data.conversation.messages]));
+            setMessages(prev => {
+              const unsavedVisitor = prev.filter(p => p.sender_type === 'visitor' && !data.conversation.messages.some((m: any) => m.id === p.id || m.content === p.content));
+              return dedupeMessages([...data.conversation.messages, ...unsavedVisitor]);
+            });
           } else if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-            setMessages(prev => dedupeMessages([...prev, ...data.messages]));
+            setMessages(prev => {
+              const unsavedVisitor = prev.filter(p => p.sender_type === 'visitor' && !data.messages.some((m: any) => m.id === p.id || m.content === p.content));
+              return dedupeMessages([...data.messages, ...unsavedVisitor]);
+            });
           }
           if (data.conversation) {
             if (data.conversation.mode === 'human' && data.conversation.assigned_agent_name) {

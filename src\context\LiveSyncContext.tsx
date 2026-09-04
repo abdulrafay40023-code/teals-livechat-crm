@@ -345,22 +345,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return updatedList;
       });
 
-      if (!initialLoadDone.current) {
-        // On initial load: add current session IDs so we don't beep for already-present visitors
-        uniqueVisitors.forEach(v => knownSessionIds.current.add(v.id));
-        initialLoadDone.current = true;
-      } else {
-        uniqueVisitors.forEach(v => {
-          // Use session.id for beep dedup (same as WebSocket handler)
-          if (!knownSessionIds.current.has(v.id)) {
-            triggerArrivalBeepIfNew(v.id, 'SyncPoll');
-          }
-        });
-      }
+      // Populate known sessions cache without noisy polling beeps
+      uniqueVisitors.forEach(v => knownSessionIds.current.add(v.id));
+      initialLoadDone.current = true;
     } catch (err) {
       console.error('[SYNC_DEBUG] Poll sync error:', err);
     }
-  }, [triggerArrivalBeepIfNew]);
+  }, []);
 
   useEffect(() => {
     refreshSync();
@@ -412,15 +403,12 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const sessionIp = (raw as Record<string, unknown>)?.ip as string;
 
         if (sessionId || sessionIp) {
-          // Remove BOTH session ID and IP so re-arrival triggers beep again
-          if (sessionId) knownSessionIds.current.delete(sessionId);
-          if (sessionIp) {
-            knownSessionIds.current.delete(sessionIp);
-            // Also delete any session whose IP matches
-            knownSessionIds.current.forEach(k => {
-              if (k === sessionIp) knownSessionIds.current.delete(k);
-            });
-          }
+          // Grace period: allow 30 seconds before allowing re-arrival beep for same session/IP
+          // This prevents rapid navigation between website pages from repeatedly ringing arrival alerts
+          setTimeout(() => {
+            if (sessionId) knownSessionIds.current.delete(sessionId);
+            if (sessionIp) knownSessionIds.current.delete(sessionIp);
+          }, 30000);
 
           setLiveVisitors((prev) => {
             const nextList = prev.filter(v => v.id !== sessionId && (!sessionIp || v.ip_address !== sessionIp));
@@ -485,7 +473,26 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             if (message) msgMap.set(message.id, message as LiveMessage);
             if (systemMessage) msgMap.set(systemMessage.id, systemMessage as LiveMessage);
 
-            const mergedMessages = Array.from(msgMap.values()).sort((a, b) => {
+            const rawMsgList = Array.from(msgMap.values());
+            const hasClaim = rawMsgList.some(m => m.sender_type === 'system' && (
+              m.content?.includes('has claimed and joined') ||
+              m.content?.includes('transferred to Live Support Agent') ||
+              m.content?.includes('taken over')
+            ));
+
+            const filteredMsgs = rawMsgList.filter(m => {
+              if (hasClaim && m.sender_type === 'system' && m.content?.includes('Transferring to a live support agent')) {
+                return false;
+              }
+              return true;
+            });
+
+            const mergedMessages = filteredMsgs.sort((a, b) => {
+              const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1);
+              const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1);
+              if (isAiGreetA && !isAiGreetB) return -1;
+              if (!isAiGreetA && isAiGreetB) return 1;
+
               if (typeof a.seq === 'number' && typeof b.seq === 'number' && a.seq !== b.seq) {
                 return a.seq - b.seq;
               }
@@ -576,9 +583,6 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             }
             return next;
           });
-        }
-        if (soundEnabledRef.current) {
-          playVisitorAlertSound();
         }
       })
       .on('broadcast', { event: 'chat_deleted' }, (payload: unknown) => {
