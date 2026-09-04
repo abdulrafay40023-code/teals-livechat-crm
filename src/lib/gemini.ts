@@ -119,46 +119,69 @@ export async function generateAIChatResponse({
   }
 
   const systemPrompt = siteConfig.systemPrompt + (cleanName ? `\nThe visitor's name is "${cleanName}". Address them warmly by name when appropriate.` : '');
-  const siteGenAI = new GoogleGenerativeAI(siteConfig.geminiApiKey || defaultApiKey);
+  
+  // Valid active Gemini model names
+  const modelsToTry = ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite'];
+  const keysToTry = [siteConfig.geminiApiKey, defaultApiKey].filter(Boolean);
 
-  // Valid Gemini model names - optimized for speed (gemini-2.0-flash responds sub-800ms)
-  const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+  for (const key of keysToTry) {
+    const aiClient = new GoogleGenerativeAI(key);
 
-  for (const modelName of modelsToTry) {
-    try {
-      const model = siteGenAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: systemPrompt,
-        generationConfig: {
-          maxOutputTokens: 140,
-          temperature: 0.6
+    for (const modelName of modelsToTry) {
+      try {
+        const model = aiClient.getGenerativeModel({
+          model: modelName,
+          systemInstruction: systemPrompt,
+          generationConfig: {
+            maxOutputTokens: 2048,
+            temperature: 0.6
+          }
+        });
+
+        // Slice to recent messages excluding the current prompt
+        const conversationHistory = messages.slice(-7, -1).map(m => ({
+          role: m.role === 'user' ? 'user' as const : 'model' as const,
+          parts: [{ text: m.content }]
+        }));
+
+        // STRICT GEMINI REQUIREMENT: First content in history MUST be with role 'user'!
+        while (conversationHistory.length > 0 && conversationHistory[0].role !== 'user') {
+          conversationHistory.shift();
         }
-      });
 
-      // Slice to last 4 messages for rapid context ingestion
-      const conversationHistory = messages.slice(-5, -1).map(m => ({
-        role: m.role === 'user' ? 'user' : 'model',
-        parts: [{ text: m.content }]
-      }));
+        // STRICT GEMINI REQUIREMENT: Roles must alternate (user -> model -> user -> model)
+        const cleanHistory: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+        for (const item of conversationHistory) {
+          if (cleanHistory.length > 0 && cleanHistory[cleanHistory.length - 1].role === item.role) {
+            cleanHistory[cleanHistory.length - 1].parts[0].text += '\n' + item.parts[0].text;
+          } else {
+            cleanHistory.push(item);
+          }
+        }
 
-      const chat = model.startChat({
-        history: conversationHistory
-      });
+        const chat = model.startChat({
+          history: cleanHistory
+        });
 
-      const result = await chat.sendMessage(lastMsg);
-      const rawText = result.response.text();
+        const result = await chat.sendMessage(lastMsg);
+        const rawText = result.response.text();
 
-      const handoffRequired = rawText.includes('[HANDOFF_REQUIRED]') || isHumanHandoffRequested(lastMsg);
-      const cleanText = rawText.replace('[HANDOFF_REQUIRED]', '').trim();
+        const handoffRequired = rawText.includes('[HANDOFF_REQUIRED]') || isHumanHandoffRequested(lastMsg);
+        const cleanText = rawText.replace('[HANDOFF_REQUIRED]', '').trim();
 
-      if (cleanText) {
-        return {
-          text: cleanText,
-          handoffRequired
-        };
+        if (cleanText) {
+          return {
+            text: cleanText,
+            handoffRequired
+          };
+        }
+      } catch (err: unknown) {
+        const errMsg = (err as Error)?.message || '';
+        console.warn(`Model ${modelName} with key ${key?.substring(0, 8)}... failed:`, errMsg);
+        if (errMsg.includes('API_KEY_INVALID')) {
+          break; // Try next key
+        }
       }
-    } catch (err) {
-      console.warn(`Model ${modelName} failed for ${siteConfig.name}, trying fallback...`, err);
     }
   }
 
