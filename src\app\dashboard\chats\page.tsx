@@ -45,10 +45,11 @@ export default function ChatsPage() {
   const [selectedWebsiteSlug, setSelectedWebsiteSlug] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       try {
-        return localStorage.getItem('teals_active_website_tab') || 'all';
+        const saved = localStorage.getItem('teals_active_website_tab');
+        if (saved && saved !== 'all') return saved;
       } catch {}
     }
-    return 'all';
+    return 'amz-solutions-hub';
   });
 
   const { conversations, refreshSync, markConversationAsRead, readConvMap } = useLiveSync();
@@ -94,22 +95,16 @@ export default function ChatsPage() {
   };
 
   const getWebsiteStats = (slug: string) => {
-    const list = conversations.filter(c => {
-      if (slug === 'all') return true;
-      return (c.property_slug || 'teals-crm') === slug;
-    });
+    const list = conversations.filter(c => (c.property_slug || 'amz-solutions-hub') === slug);
     const unread = list.filter(convHasUnread).length;
     return { count: list.length, unread };
   };
 
-  const allStats = getWebsiteStats('all');
-
   const filteredConversations = conversations.filter(c => {
-    if (selectedWebsiteSlug === 'all') return true;
-    return (c.property_slug || 'teals-crm') === selectedWebsiteSlug;
+    return (c.property_slug || 'amz-solutions-hub') === selectedWebsiteSlug;
   });
 
-  const activeSiteConfig = selectedWebsiteSlug !== 'all' ? getWebsiteConfig(selectedWebsiteSlug) : null;
+  const activeSiteConfig = getWebsiteConfig(selectedWebsiteSlug);
 
   const getWebsiteIcon = (slug: string) => {
     switch (slug) {
@@ -157,36 +152,9 @@ export default function ChatsPage() {
         )}
       </div>
 
-      {/* Top 5-Website Isolated Section Switcher Tabs */}
-      <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-1.5 shadow-xl">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
-          {/* All Websites Tab */}
-          <button
-            type="button"
-            onClick={() => handleSelectWebsiteTab('all')}
-            className={`p-2 rounded-xl text-left transition-all relative border flex flex-col justify-between ${
-              selectedWebsiteSlug === 'all'
-                ? 'bg-[#15223e] border-blue-500 shadow-lg shadow-blue-500/20 text-white'
-                : 'bg-[#0d1424] border-transparent hover:border-gray-800 text-gray-400 hover:text-white'
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-1.5">
-                <Globe className={`w-3.5 h-3.5 ${selectedWebsiteSlug === 'all' ? 'text-blue-400' : 'text-gray-500'}`} />
-                <span className="text-xs font-bold truncate">All Websites</span>
-              </div>
-              {allStats.unread > 0 && (
-                <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
-                  {allStats.unread}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center justify-between mt-1 text-[10px] text-gray-400">
-              <span className="truncate">Combined Feed</span>
-              <span className="px-1.5 py-0.2 rounded-full bg-white/10 font-bold">{allStats.count}</span>
-            </div>
-          </button>
-
+      {/* Top 5-Website Dedicated Isolated Inboxes */}
+      <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-2 shadow-xl">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
           {/* 5 Distinct Dedicated Website Sections */}
           {websites.map((site) => {
             const IconComponent = getWebsiteIcon(site.slug);
