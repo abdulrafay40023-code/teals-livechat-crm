@@ -36,6 +36,14 @@ export default function LoginPage() {
     setError('');
     setGoogleLoading(true);
     try {
+      // If embedded in an iframe (e.g. CRM), open in clean top window/tab so Google never blocks with 403!
+      const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+      if (isIframe) {
+        window.open('https://teals-livechat-saas.vercel.app/login', '_blank');
+        setGoogleLoading(false);
+        return;
+      }
+
       const origin = typeof window !== 'undefined' ? window.location.origin : 'https://teals-livechat-saas.vercel.app';
       const { error: authErr } = await supabase.auth.signInWithOAuth({
         provider: 'google',

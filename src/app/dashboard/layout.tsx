@@ -26,6 +26,39 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const { liveCount, chatCount, unreadConversationsCount, conversations, soundEnabled, toggleSound, unreadCount, resetUnreadCount } = useLiveSync();
 
   useEffect(() => {
+    // 1. Auto Single Sign-On (SSO) when embedded inside CRM
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const ssoEmail = urlParams.get('sso_email');
+      const ssoName = urlParams.get('sso_name');
+      const ssoRole = urlParams.get('sso_role');
+
+      if (ssoEmail) {
+        const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+        const cleanEmail = ssoEmail.toLowerCase().trim();
+        const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
+        const ssoAgent = {
+          id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          email: cleanEmail,
+          full_name: ssoName || cleanEmail.split('@')[0],
+          role: isAdm ? 'admin' : (ssoRole || 'agent'),
+          status: 'approved'
+        };
+        localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+        setCurrentAgent(ssoAgent);
+
+        fetch('/api/agent/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: ssoAgent.email,
+            status: 'online'
+          })
+        }).catch(() => {});
+        return;
+      }
+    }
+
     const rawSession = localStorage.getItem('teals_agent_session');
     if (!rawSession) {
       router.push('/login');

@@ -18,6 +18,25 @@ export default function ChatsPage() {
   }>(() => {
     if (typeof window !== 'undefined') {
       try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const ssoEmail = urlParams.get('sso_email');
+        const ssoName = urlParams.get('sso_name');
+        const ssoRole = urlParams.get('sso_role');
+        if (ssoEmail) {
+          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+          const cleanEmail = ssoEmail.toLowerCase().trim();
+          const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
+          const ssoAgent = {
+            id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+            email: cleanEmail,
+            full_name: ssoName || cleanEmail.split('@')[0],
+            role: isAdm ? 'admin' : (ssoRole || 'agent'),
+            status: 'approved'
+          };
+          localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+          return ssoAgent;
+        }
+
         const rawSession = localStorage.getItem('teals_agent_session');
         if (rawSession) {
           const parsed = JSON.parse(rawSession);
@@ -55,6 +74,31 @@ export default function ChatsPage() {
   const { conversations, refreshSync, markConversationAsRead, readConvMap } = useLiveSync();
 
   useEffect(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const ssoEmail = urlParams.get('sso_email');
+      const ssoName = urlParams.get('sso_name');
+      const ssoRole = urlParams.get('sso_role');
+      if (ssoEmail) {
+        const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+        const cleanEmail = ssoEmail.toLowerCase().trim();
+        const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
+        const ssoAgent = {
+          id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          email: cleanEmail,
+          full_name: ssoName || cleanEmail.split('@')[0],
+          role: isAdm ? 'admin' : (ssoRole || 'agent'),
+          status: 'approved'
+        };
+        localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+        setCurrentAgent(ssoAgent);
+        const key = getSelectedKey(cleanEmail);
+        const saved = localStorage.getItem(key);
+        if (saved) setSelectedChatId(saved);
+        return;
+      }
+    } catch {}
+
     const rawSession = localStorage.getItem('teals_agent_session');
     if (rawSession) {
       try {
