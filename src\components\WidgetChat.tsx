@@ -6,6 +6,8 @@ import { AgentAvatar } from '@/components/AgentAvatar';
 import { supabase } from '@/lib/supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
 
+import { getWebsiteConfig } from '@/lib/websites-config';
+
 interface WidgetChatProps {
   propertySlug?: string;
   visitorTokenProp?: string;
@@ -14,7 +16,7 @@ interface WidgetChatProps {
   referrerUrl?: string;
 }
 
-const DEFAULT_GREETING = 'Hey! How can I help you with Teals CRM today?';
+const DEFAULT_GREETING = 'Hey! How can I help you today?';
 
 interface SavedConvSummary {
   id: string;
@@ -22,7 +24,7 @@ interface SavedConvSummary {
   updatedAt: string;
 }
 
-const dedupeMessages = (incomingList: any[]) => {
+const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING, defaultSenderName = 'AI Assistant') => {
   const map = new Map<string, any>();
   let seenGreet = false;
 
@@ -38,7 +40,12 @@ const dedupeMessages = (incomingList: any[]) => {
     if (hasClaimOrJoined && m.sender_type === 'system' && m.content?.includes('Transferring to a live support agent')) {
       return;
     }
-    const isGreet = m.sender_type === 'ai' && (m.id === 'init-greet' || m.id?.startsWith?.('init-greet') || m.content?.trim() === DEFAULT_GREETING.trim());
+    const isGreet = m.sender_type === 'ai' && (
+      m.id === 'init-greet' || 
+      m.id?.startsWith?.('init-greet') || 
+      (m.content || '').includes('Hey! How can I help') || 
+      (m.content || '').includes('Welcome to')
+    );
     if (isGreet) {
       if (seenGreet) return;
       seenGreet = true;
@@ -58,8 +65,8 @@ const dedupeMessages = (incomingList: any[]) => {
     map.set('init-greet', {
       id: 'init-greet',
       sender_type: 'ai',
-      sender_name: 'Teals AI Agent',
-      content: DEFAULT_GREETING,
+      sender_name: defaultSenderName,
+      content: defaultGreeting,
       seq: 1,
       status: 'read',
       created_at: '1970-01-01T00:00:00.000Z'
@@ -119,6 +126,10 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   pageUrl,
   referrerUrl
 }) => {
+  const siteConfig = getWebsiteConfig(propertySlug);
+  const siteGreeting = `Hey! Welcome to ${siteConfig.name}. How can we assist you with our services today?`;
+  const siteAiName = `${siteConfig.shortName} AI Assistant`;
+
   const [isOpen, setIsOpen] = useState(false);
   const [showGreetingBubble, setShowGreetingBubble] = useState(true);
   const [visitorToken, setVisitorToken] = useState(visitorTokenProp || '');
@@ -135,8 +146,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     {
       id: 'init-greet',
       sender_type: 'ai',
-      sender_name: 'Teals AI Agent',
-      content: DEFAULT_GREETING,
+      sender_name: siteAiName,
+      content: siteGreeting,
       seq: 1,
       status: 'read',
       created_at: '1970-01-01T00:00:00.000Z'
@@ -410,8 +421,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         {
           id: 'init-greet',
           sender_type: 'ai',
-          sender_name: 'Teals AI Agent',
-          content: DEFAULT_GREETING,
+          sender_name: siteAiName,
+          content: siteGreeting,
           seq: 1,
           status: 'read',
           created_at: '1970-01-01T00:00:00.000Z'
@@ -447,7 +458,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             const nextList = [...prev];
             if (message) nextList.push(message);
             if (systemMessage) nextList.push(systemMessage);
-            return dedupeMessages(nextList);
+            return dedupeMessages(nextList, siteGreeting, siteAiName);
           });
           if (conv && conv.mode === 'human' && conv.assigned_agent_name) {
             setIsHumanConnected(true);
@@ -696,7 +707,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       if (localCached) {
         const parsed = JSON.parse(localCached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setMessages(dedupeMessages(parsed));
+          setMessages(dedupeMessages(parsed, siteGreeting, siteAiName));
         }
       }
     } catch {}
@@ -709,7 +720,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.messages && Array.isArray(data.messages) && data.messages.length > 0) {
-          setMessages(dedupeMessages(data.messages));
+          setMessages(dedupeMessages(data.messages, siteGreeting, siteAiName));
           try {
             localStorage.setItem('teals_conv_cache_' + convId, JSON.stringify(data.messages));
           } catch {}
@@ -738,7 +749,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     // 1. Snapshot current conversation to history list & cache
     let currentList = [...savedConversations];
     if (conversationId) {
-      const lastMsg = messages.length > 1 ? (messages[messages.length - 1]?.content || 'Chat Session') : DEFAULT_GREETING;
+      const lastMsg = messages.length > 1 ? (messages[messages.length - 1]?.content || 'Chat Session') : siteGreeting;
       const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       const currentEntry: SavedConvSummary = { id: conversationId, lastMessage: lastMsg, updatedAt: timeStr };
       currentList = [currentEntry, ...currentList.filter(c => c.id !== conversationId)];
@@ -758,7 +769,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
     const newConvSummary: SavedConvSummary = {
       id: newConvId,
-      lastMessage: DEFAULT_GREETING,
+      lastMessage: siteGreeting,
       updatedAt: 'Just now'
     };
 
@@ -774,8 +785,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     const initGreet = {
       id: 'init-greet',
       sender_type: 'ai' as const,
-      sender_name: 'Teals AI Agent',
-      content: DEFAULT_GREETING,
+      sender_name: siteAiName,
+      content: siteGreeting,
       seq: 1,
       status: 'read' as const,
       created_at: '1970-01-01T00:00:00.000Z'
@@ -796,6 +807,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           id: 'init_' + newConvId,
           conversationId: newConvId,
           visitorToken: visitorToken || newConvId,
+          propertySlug,
+          pageUrl,
+          referrerUrl,
           senderType: 'system',
           senderName: 'System',
           senderEmail: cleanEmail || undefined,
@@ -875,7 +889,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     setMessages((prev) => {
       const nextList = [...prev, optimisticMsg];
       if (optimisticSysMsg) nextList.push(optimisticSysMsg);
-      return dedupeMessages(nextList);
+      return dedupeMessages(nextList, siteGreeting, siteAiName);
     });
 
     // Instantly stream visitor message and handoff system message to Dashboard (sub-5ms)
@@ -919,6 +933,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           id: clientMsgId,
           conversationId,
           visitorToken,
+          propertySlug,
+          pageUrl,
+          referrerUrl,
           senderType: 'visitor',
           senderName: userName || 'Visitor',
           senderEmail: userEmail || undefined,
@@ -939,7 +956,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
         const serverMsgs = data.conversation?.messages || (data.aiMessage ? [data.message, data.aiMessage] : [data.message]);
         if (serverMsgs && Array.isArray(serverMsgs)) {
-          setMessages(prev => dedupeMessages([...prev, ...serverMsgs]));
+          setMessages(prev => dedupeMessages([...prev, ...serverMsgs], siteGreeting, siteAiName));
         }
       }
     } catch (err) {
@@ -963,7 +980,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               setViewingHistory(false);
             }
           }} className="flex items-center space-x-2">
-            <span className="text-xs font-semibold text-gray-800">{DEFAULT_GREETING}</span>
+            <span className="text-xs font-semibold text-gray-800">{siteGreeting}</span>
           </div>
           <button
             onClick={(e) => {
@@ -1058,12 +1075,12 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               <div>
                 <h3 className="text-xs font-bold text-white">
                   {!hasSubmittedLead
-                    ? 'Welcome to Live Support'
+                    ? `Welcome to ${siteConfig.shortName}`
                     : viewingHistory
                     ? 'Conversations'
                     : isHumanConnected
                     ? (agentName || 'Support Agent')
-                    : 'Teals AI Agent'}
+                    : siteAiName}
                 </h3>
                 <div className="flex items-center space-x-1.5 text-[10px] text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

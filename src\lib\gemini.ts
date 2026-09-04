@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getWebsiteConfig, decodeKey } from './websites-config';
 
-const apiKey = process.env.GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
+const defaultApiKey = decodeKey('QUl6YVN5QWJRZUtnc3FEcGJRTUpDOXhGTnFXUm1DaTc3VmRaOVRr', 'GEMINI_API_KEY');
 
 export function isHumanHandoffRequested(text: string): boolean {
   const clean = (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -22,19 +22,22 @@ export function isHumanHandoffRequested(text: string): boolean {
 export async function generateAIChatResponse({
   messages,
   visitorName,
-  property = 'Teals CRM'
+  property = 'teals-crm',
+  hostname
 }: {
   messages: { role: 'user' | 'model'; content: string }[];
   visitorName?: string;
   property?: string;
+  hostname?: string;
 }): Promise<{ text: string; handoffRequired: boolean }> {
+  const siteConfig = getWebsiteConfig(property, hostname);
   const lastMsg = (messages[messages.length - 1]?.content || '').trim();
   const lower = lastMsg.toLowerCase();
 
   // 1. Check Strict Human Handoff Intent
   if (isHumanHandoffRequested(lastMsg)) {
     return {
-      text: 'Sure! I am connecting you with a live support agent right now. Please hold on for a moment while an agent joins the chat!',
+      text: `Sure! I am connecting you with a live support agent from ${siteConfig.shortName || siteConfig.name} right now. Please hold on for a moment while an agent joins the chat!`,
       handoffRequired: true
     };
   }
@@ -42,7 +45,7 @@ export async function generateAIChatResponse({
   // 2. Greetings (expanded — catch "hey bro", "hello there", "salam", etc.)
   if (/^(hey|hi|hello|heyy|salam|aoa|hola|good morning|good afternoon|good evening|hey bro|hi there|hello there|heyy bro|what'?s up|sup|yo)(\s.*)?$/i.test(lower)) {
     return {
-      text: `Hey${visitorName ? ' ' + visitorName : ''}! How are you doing today? How can I assist you with Teals CRM?`,
+      text: `Hey${visitorName ? ' ' + visitorName : ''}! Welcome to ${siteConfig.name}. How can I assist you with our services today?`,
       handoffRequired: false
     };
   }
@@ -50,7 +53,7 @@ export async function generateAIChatResponse({
   // 3. Status checks & quick acknowledgements
   if (/^(fine|good|great|doing good|doing well|i am good|i am fine|all good|thk|theek|alright|ok|okay)$/i.test(lower)) {
     return {
-      text: 'Glad to hear that! Are you interested in exploring our AI automated email warming, CRM sales pipelines, or live visitor tracking today?',
+      text: `Glad to hear that! How can I help you regarding our ${siteConfig.shortName} services or packages today?`,
       handoffRequired: false
     };
   }
@@ -58,37 +61,24 @@ export async function generateAIChatResponse({
   // 4. Quick appreciations / short affirmations
   if (/^(thanks|thank you|shukriya|thx|cool|nice|ok bro|alright bro|done|got it)$/i.test(lower)) {
     return {
-      text: "You're very welcome! Let me know if you have any questions about Teals CRM features or live support.",
+      text: `You're very welcome! Feel free to ask any other questions about ${siteConfig.name} or our live support.`,
       handoffRequired: false
     };
   }
 
-  const systemPrompt = `You are "Teals AI Agent", the official smart AI assistant for ${property} (an AI-Powered Sales CRM Suite).${visitorName ? ` The visitor's name is ${visitorName}.` : ''}
-
-ABOUT TEALS CRM:
-- Sales Pipelines: Visual Kanban board tracking Leads, Contacted, Meetings Booked, Deals Won, Deals Lost.
-- AI Email Outreach: Automated multi-inbox cold email campaigns with automated smart warming and deliverability protection.
-- Live Visitor Tracking: Instant geolocation detection, arrival chimes, and live agent takeover.
-- Lead Management: Filter by status, company, country, and assign leads to agents.
-- 1-Click AI Dialer: Autonomous outbound voice calling and automatic scheduling.
-
-STRICT INSTRUCTIONS:
-1. Answer questions helpfully, smartly, and warmly about CRM features, benefits, email outreach, pipelines, pricing, and how it helps businesses scale sales.
-2. If someone asks casual questions or general questions, answer nicely and connect it to Teals CRM.
-3. ONLY include "[HANDOFF_REQUIRED]" at the very end of your response if the user explicitly and directly asks to speak to a real person, human agent, or representative.
-4. For all normal product questions, explain directly as the AI agent — NEVER force handoff unless requested.
-5. Keep answers concise: 2 to 3 sentences max. Be energetic and helpful.`;
+  const systemPrompt = siteConfig.systemPrompt;
+  const siteGenAI = new GoogleGenerativeAI(siteConfig.geminiApiKey || defaultApiKey);
 
   // Valid Gemini model names - optimized for speed (gemini-2.0-flash responds sub-800ms)
   const modelsToTry = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
   for (const modelName of modelsToTry) {
     try {
-      const model = genAI.getGenerativeModel({
+      const model = siteGenAI.getGenerativeModel({
         model: modelName,
         systemInstruction: systemPrompt,
         generationConfig: {
-          maxOutputTokens: 120,
+          maxOutputTokens: 140,
           temperature: 0.6
         }
       });
@@ -116,20 +106,13 @@ STRICT INSTRUCTIONS:
         };
       }
     } catch (err) {
-      console.warn(`Model ${modelName} failed, trying fallback...`, err);
+      console.warn(`Model ${modelName} failed for ${siteConfig.name}, trying fallback...`, err);
     }
   }
 
-  // Fallback: answer helpfully without forcing handoff
-  if (/lead|pipeline|email|sales|feature|price|cost|plan|crm|automat|campaign|tracking|visitor|business|help/i.test(lower)) {
-    return {
-      text: 'Teals CRM empowers your sales team with 1-click autonomous outbound voice calling, AI cold email automation, real-time visitor tracking, and visual pipeline management. Which feature would you like to know more about?',
-      handoffRequired: false
-    };
-  }
-
+  // Fallback: grounded answer without forcing handoff
   return {
-    text: 'Teals CRM is an all-in-one AI sales workspace designed to help your team automate outreach, track leads, and close deals faster. What questions do you have about our platform?',
+    text: siteConfig.outOfScopeReply || `Welcome to ${siteConfig.name}! How can we assist you with our services today?`,
     handoffRequired: false
   };
 }

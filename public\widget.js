@@ -14,7 +14,19 @@
     } catch (e) {}
   }
 
-  var propertySlug = (scriptEl && scriptEl.getAttribute('data-property-slug')) || 'teals-crm';
+  function detectSlugFromHostname(hostname) {
+    var h = (hostname || '').toLowerCase();
+    if (h.indexOf('amzsolutionshub.com') !== -1) return 'amz-solutions-hub';
+    if (h.indexOf('amzinnovators.com') !== -1) return 'amz-innovators';
+    if (h.indexOf('authorsbreeze.com') !== -1) return 'authors-breeze';
+    if (h.indexOf('probookpublishing.com') !== -1) return 'pro-book-publishing';
+    if (h.indexOf('amzwritershub.com') !== -1) return 'amz-writers-hub';
+    return null;
+  }
+
+  var explicitSlug = scriptEl && scriptEl.getAttribute('data-property-slug');
+  var detectedSlug = detectSlugFromHostname(window.location.hostname);
+  var propertySlug = explicitSlug || detectedSlug || 'teals-crm';
   var isAdmin = window.location.pathname.startsWith('/dashboard') || window.location.pathname.startsWith('/admin');
 
   // PER-TAB SESSION ID GENERATED STRICTLY ONCE PER TAB
@@ -46,7 +58,7 @@
   function sendTracking(isNew) {
     if (isAdmin) return;
     try {
-      var currentPath = window.location.pathname || '/';
+      var currentUrl = window.location.href || window.location.pathname || '/';
       var referrer = document.referrer || 'Direct';
 
       fetch(serverOrigin + '/api/visitor/track', {
@@ -56,7 +68,7 @@
           sessionId: tabSessionId,
           visitorToken: visitorToken,
           propertySlug: propertySlug,
-          currentPage: currentPath,
+          currentPage: currentUrl,
           referrer: referrer,
           isNewPageView: isNew
         })
@@ -113,7 +125,7 @@
   if (!isAdmin) {
     var iframe = document.createElement('iframe');
     iframe.id = 'teals-livechat-iframe';
-    iframe.src = serverOrigin + '/widget?property=' + encodeURIComponent(propertySlug) + '&session=' + encodeURIComponent(tabSessionId) + '&token=' + encodeURIComponent(visitorToken) + '&_v=20260904_1';
+    iframe.src = serverOrigin + '/widget?property=' + encodeURIComponent(propertySlug) + '&page=' + encodeURIComponent(window.location.href || window.location.pathname || '/') + '&ref=' + encodeURIComponent(document.referrer || 'Direct') + '&session=' + encodeURIComponent(tabSessionId) + '&token=' + encodeURIComponent(visitorToken) + '&_v=20260904_2';
     iframe.style.position = 'fixed';
     iframe.style.bottom = '20px';
     iframe.style.right = '20px';

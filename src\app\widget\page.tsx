@@ -9,8 +9,8 @@ function WidgetInner() {
   const propertySlug = searchParams.get('property') || 'teals-crm';
   const visitorToken = searchParams.get('token') || undefined;
   const sessionId = searchParams.get('session') || undefined;
-  const pageUrl = searchParams.get('page') || '/';
-  const referrerUrl = searchParams.get('ref') || 'Direct';
+  const pageUrl = searchParams.get('pageUrl') || searchParams.get('page') || '/';
+  const referrerUrl = searchParams.get('referrer') || searchParams.get('ref') || 'Direct';
 
   return (
     <div className="w-full h-full bg-transparent">

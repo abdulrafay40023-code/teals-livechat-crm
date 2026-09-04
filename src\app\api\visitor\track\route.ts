@@ -3,6 +3,7 @@ import { granularStore, StoreVisitorSession, StoreMessage } from '@/lib/store';
 import { lookupGeoAsync } from '@/lib/geo';
 import { parseUserAgent } from '@/lib/device';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { detectWebsiteSlugFromUrl } from '@/lib/websites-config';
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -29,6 +30,11 @@ export async function POST(req: NextRequest) {
       visitorEmail
     } = body;
 
+    const refererHeader = req.headers.get('referer');
+    const effectiveSlug = (propertySlug && propertySlug !== 'teals-crm')
+      ? propertySlug
+      : detectWebsiteSlugFromUrl(currentPage || refererHeader);
+
     const sid = sessionId || ('tab_' + Math.random().toString(36).substring(2, 10));
     const token = visitorToken || sid;
 
@@ -44,13 +50,13 @@ export async function POST(req: NextRequest) {
     const session: StoreVisitorSession = {
       id: sid,
       visitor_token: token,
-      property_slug: propertySlug,
+      property_slug: effectiveSlug,
       ip_address: ip,
       country: geo.country,
       country_code: geo.countryCode,
       city: geo.city,
       flag: geo.flag,
-      referrer: referrer,
+      referrer: referrer || refererHeader || 'Direct',
       current_page: currentPage,
       browser: dev.browser,
       os: dev.os,
@@ -68,20 +74,24 @@ export async function POST(req: NextRequest) {
     await granularStore.saveSession(session);
 
     let conv = await granularStore.getConversation(token);
-    if (conv && (visitorName || visitorEmail)) {
+    if (conv) {
       if (visitorName) conv.visitor_name = visitorName;
       if (visitorEmail) conv.visitor_email = visitorEmail;
+      if (!conv.property_slug || conv.property_slug === 'teals-crm') {
+        conv.property_slug = effectiveSlug;
+      }
       conv.visitor_ip = ip;
       conv.updated_at = nowIso;
       await granularStore.saveConversation(conv);
     }
 
     // Fetch authoritative unique analytics
-    const activeData = await granularStore.getAllActiveData(propertySlug);
+    const activeData = await granularStore.getAllActiveData(effectiveSlug);
 
     // Broadcast instant arrival with authoritative counts
     await broadcastRealtimeEvent('visitor_arrival', {
       session,
+      propertySlug: effectiveSlug,
       todayCount: activeData.todayVisitorsCount,
       totalUniqueCount: activeData.totalUniqueCount,
       isNew: true,

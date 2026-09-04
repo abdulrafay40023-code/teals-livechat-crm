@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, Send,
   Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2,
-  UserCheck, ArrowRightLeft, X
+  UserCheck, ArrowRightLeft, X, ExternalLink
 } from 'lucide-react';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { getCountryFlagUrl } from '@/lib/flags';
@@ -12,9 +12,11 @@ import { supabase } from '@/lib/supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
 import { ClaimChatModal } from '@/components/ClaimChatModal';
 import { useLiveSync } from '@/context/LiveSyncContext';
+import { getWebsiteConfig } from '@/lib/websites-config';
 
 export interface ChatSession {
   id: string;
+  property_slug?: string;
   visitor_id: string;
   visitor_name: string;
   visitor_email?: string;
@@ -817,6 +819,7 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
     const unreadCount = getUnreadCountForConv(conv);
     const isTyping = !!(conv.typing_preview && conv.typing_preview.trim().length > 0);
     const chatBadge = getChatBadge(conv);
+    const siteConfig = getWebsiteConfig(conv.property_slug || 'teals-crm');
 
     return (
       <div
@@ -838,13 +841,18 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
               onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
             />
             <div className="min-w-0 flex-1">
-              <h4 className="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
-                <span className="truncate">{conv.visitor_name}</span>
+              <div className="flex items-center space-x-1.5 mb-1">
+                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${siteConfig.badgeColor}`}>
+                  {siteConfig.shortName}
+                </span>
                 {chatBadge && (
                   <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/40 flex-shrink-0">
                     {chatBadge}
                   </span>
                 )}
+              </div>
+              <h4 className="text-xs font-bold text-white flex items-center space-x-1.5 truncate">
+                <span className="truncate">{conv.visitor_name}</span>
                 {conv.visitor_email && (
                   <span className="text-[10px] font-normal text-dark-muted truncate">({conv.visitor_email})</span>
                 )}
@@ -1114,24 +1122,50 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                     name={selectedConv.assigned_agent_name || ''}
                     size="md"
                   />
-                  <div>
-                    <h3 className="text-xs font-bold text-white">
-                      {selectedConv.assigned_agent_name
-                        ? selectedConv.assigned_agent_name
-                        : isAiAutomated
-                        ? 'Teals AI Auto-Support'
-                        : 'Unassigned Chat'}
-                    </h3>
-                    <p className="text-[10px] text-dark-muted">
-                      {isClaimedByMe
-                        ? 'You are actively assisting this customer'
-                        : isClaimedByOther
-                        ? `Assigned to ${selectedConv.assigned_agent_name}`
-                        : isAiAutomated
-                        ? 'AI is handling conversation — Admin monitoring'
-                        : 'Customer requested human assistance — claim to take over'}
-                    </p>
-                  </div>
+                  {(() => {
+                    const selectedSiteConfig = getWebsiteConfig(selectedConv.property_slug || 'teals-crm');
+                    return (
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="text-xs font-bold text-white">
+                            {selectedConv.assigned_agent_name
+                              ? selectedConv.assigned_agent_name
+                              : isAiAutomated
+                              ? `${selectedSiteConfig.shortName} AI Auto-Support`
+                              : 'Unassigned Chat'}
+                          </h3>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${selectedSiteConfig.badgeColor}`}>
+                            {selectedSiteConfig.shortName}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-2 text-[10px] text-dark-muted mt-0.5">
+                          <span>
+                            {isClaimedByMe
+                              ? 'You are actively assisting this customer'
+                              : isClaimedByOther
+                              ? `Assigned to ${selectedConv.assigned_agent_name}`
+                              : isAiAutomated
+                              ? `AI handling via ${selectedSiteConfig.shortName} dedicated engine`
+                              : 'Customer requested human assistance — claim to take over'}
+                          </span>
+                          {selectedSiteConfig.domain && (
+                            <>
+                              <span>•</span>
+                              <a
+                                href={selectedSiteConfig.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-blue-400 hover:underline flex items-center space-x-0.5"
+                              >
+                                <span>{selectedSiteConfig.domain}</span>
+                                <ExternalLink className="w-2.5 h-2.5 inline" />
+                              </a>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -1403,23 +1437,57 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 </div>
               </div>
 
-              <div>
-                <h4 className="text-[11px] font-bold text-dark-muted uppercase mb-2">Navigation</h4>
-                <div className="bg-dark-card border border-dark-border rounded-xl p-3 space-y-2 text-xs">
+              {(() => {
+                const selectedSiteConfig = getWebsiteConfig(selectedConv.property_slug || 'teals-crm');
+                return (
                   <div>
-                    <span className="text-dark-muted text-[10px]">Active CRM Page:</span>
-                    <p className="font-mono text-brand-secondary text-[11px] truncate">{selectedConv.visitor?.current_page || '/crm'}</p>
+                    <h4 className="text-[11px] font-bold text-dark-muted uppercase mb-2">Origin Website & Navigation</h4>
+                    <div className="bg-dark-card border border-dark-border rounded-xl p-3 space-y-2.5 text-xs">
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Origin Website:</span>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="font-bold text-white text-[11px] truncate mr-2">{selectedSiteConfig.name}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${selectedSiteConfig.badgeColor}`}>
+                            {selectedSiteConfig.shortName}
+                          </span>
+                        </div>
+                      </div>
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Website URL:</span>
+                        <p className="font-mono text-[11px] text-blue-400 truncate">
+                          <a href={selectedSiteConfig.url} target="_blank" rel="noreferrer" className="hover:underline flex items-center space-x-1">
+                            <span className="truncate">{selectedSiteConfig.url}</span>
+                            <ExternalLink className="w-2.5 h-2.5 inline flex-shrink-0" />
+                          </a>
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Active Page URL:</span>
+                        <p className="font-mono text-brand-secondary text-[11px] break-all">
+                          {selectedConv.visitor?.current_page || '/'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Traffic Referrer:</span>
+                        <p className="font-mono text-white text-[11px] truncate">
+                          {selectedConv.visitor?.referrer || 'Direct Visit'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Dedicated AI Key:</span>
+                        <p className="text-emerald-400 text-[10px] font-semibold flex items-center space-x-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                          <span className="truncate">Gemini 2.0 Flash ({selectedSiteConfig.shortName})</span>
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-dark-muted text-[10px]">Device:</span>
+                        <p className="text-dark-text text-[11px]">{selectedConv.visitor?.os || 'Mobile / Desktop'} on {selectedConv.visitor?.browser || 'Chrome'}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-dark-muted text-[10px]">Referrer:</span>
-                    <p className="font-mono text-white text-[11px] truncate">{selectedConv.visitor?.referrer || 'Direct Visit'}</p>
-                  </div>
-                  <div>
-                    <span className="text-dark-muted text-[10px]">Device:</span>
-                    <p className="text-dark-text text-[11px]">{selectedConv.visitor?.os || 'Mobile / Desktop'} on {selectedConv.visitor?.browser || 'Chrome'}</p>
-                  </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
           ) : (
             <div className="text-center text-xs text-dark-muted py-8">

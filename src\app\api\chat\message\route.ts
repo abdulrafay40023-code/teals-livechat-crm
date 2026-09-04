@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { granularStore, StoreMessage, StoreConversation } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { isHumanHandoffRequested, generateAIChatResponse } from '@/lib/gemini';
+import { getWebsiteConfig, detectWebsiteSlugFromUrl } from '@/lib/websites-config';
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -45,7 +46,9 @@ export async function POST(req: NextRequest) {
       id: clientMsgId,
       conversationId,
       visitorToken,
-      propertySlug = 'teals-crm',
+      propertySlug,
+      pageUrl,
+      referrerUrl,
       senderType,
       senderName,
       senderEmail,
@@ -58,6 +61,12 @@ export async function POST(req: NextRequest) {
     if (!content || !senderType) {
       return NextResponse.json({ error: 'Missing content or senderType' }, { status: 400 });
     }
+
+    const refererHeader = req.headers.get('referer');
+    const effectiveSlug = (propertySlug && propertySlug !== 'teals-crm')
+      ? propertySlug
+      : detectWebsiteSlugFromUrl(pageUrl || refererHeader);
+    const siteConfig = getWebsiteConfig(effectiveSlug);
 
     const convId = conversationId || visitorToken || ('conv_' + Math.random().toString(36).substring(2, 9));
 
@@ -95,7 +104,7 @@ export async function POST(req: NextRequest) {
 
       conv = {
         id: convId,
-        property_slug: propertySlug,
+        property_slug: effectiveSlug,
         visitor_id: visitorToken || convId,
         visitor_name: senderName || 'Visitor',
         visitor_email: senderEmail || undefined,
@@ -109,8 +118,8 @@ export async function POST(req: NextRequest) {
             id: 'init-greet',
             conversation_id: convId,
             sender_type: 'ai',
-            sender_name: 'Teals AI Agent',
-            content: "Hey! How can I help you with Teals CRM today?",
+            sender_name: `${siteConfig.shortName} AI Assistant`,
+            content: `Hey! Welcome to ${siteConfig.name}. How can we assist you with our services today?`,
             is_whisper: false,
             seq: 1,
             created_at: '1970-01-01T00:00:00.000Z'
@@ -118,6 +127,11 @@ export async function POST(req: NextRequest) {
         ]
       };
     } else {
+      if (!conv.property_slug || conv.property_slug === 'teals-crm') {
+        if (effectiveSlug && effectiveSlug !== 'teals-crm') {
+          conv.property_slug = effectiveSlug;
+        }
+      }
       if (isHumanMode) {
         conv.mode = 'human';
         if (assignedAgentName && !conv.assigned_agent_name) conv.assigned_agent_name = assignedAgentName;
@@ -227,10 +241,13 @@ export async function POST(req: NextRequest) {
           content: m.content
         }));
 
+      const activeSlug = conv.property_slug || effectiveSlug || 'teals-crm';
+      const activeSiteConfig = getWebsiteConfig(activeSlug);
+
       const aiRes = await generateAIChatResponse({
         messages: historyForAI,
         visitorName: conv.visitor_name,
-        property: 'Teals CRM'
+        property: activeSlug
       });
 
       // Reload fresh conversation state from store
@@ -251,7 +268,7 @@ export async function POST(req: NextRequest) {
         id: aiMsgId,
         conversation_id: freshConv.id,
         sender_type: 'ai',
-        sender_name: 'Teals AI Agent',
+        sender_name: `${activeSiteConfig.shortName} AI Assistant`,
         content: aiRes.text,
         is_whisper: false,
         seq: (freshConv.messages.length || 0) + 1,

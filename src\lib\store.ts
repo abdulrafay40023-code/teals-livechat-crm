@@ -112,8 +112,8 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
 
   const sorted = list.sort((a, b) => {
     // 1. Initial AI Greeting always comes first
-    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && (a.seq === 1 || (a.content || '').includes('Hey! How can I help')));
-    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && (b.seq === 1 || (b.content || '').includes('Hey! How can I help')));
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && (a.seq === 1 || (a.content || '').includes('Hey! How can I help') || (a.content || '').includes('Welcome to')));
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && (b.seq === 1 || (b.content || '').includes('Hey! How can I help') || (b.content || '').includes('Welcome to')));
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
@@ -399,7 +399,8 @@ class GranularStore {
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
-    const filteredSessions = allSessions.filter(s => s.property_slug === propertySlug);
+    const isGlobal = !propertySlug || propertySlug === 'all' || propertySlug === 'teals-crm';
+    const filteredSessions = isGlobal ? allSessions : allSessions.filter(s => s.property_slug === propertySlug);
     const rawLiveSessions = filteredSessions.filter(s => {
       const lastActive = new Date(s.last_active_at).getTime();
       return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
@@ -443,7 +444,7 @@ class GranularStore {
     this.todayIps.set(today, currentTodaySet);
     this.allTimeIps = currentAllTimeSet;
 
-    const filteredConvs = allConvs.filter(c => !c.property_slug || c.property_slug === propertySlug);
+    const filteredConvs = isGlobal ? allConvs : allConvs.filter(c => c.property_slug === propertySlug);
     const activeConversations = filteredConvs.filter(c => {
       return (c.messages && c.messages.length > 0) || !!c.visitor_name || c.mode === 'human' || c.status === 'pending_agent' || !!c.assigned_agent_id;
     });
