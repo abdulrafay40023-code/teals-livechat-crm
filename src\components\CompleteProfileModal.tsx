@@ -15,7 +15,7 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
   onSignOut,
 }) => {
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('+1 ');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -25,7 +25,7 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
       setError('Please enter your full name');
       return;
     }
-    if (!phone.trim() || phone.trim() === '+1') {
+    if (!phone.trim()) {
       setError('Please enter a valid phone number');
       return;
     }
@@ -96,7 +96,7 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
               type="text"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              placeholder="+1 (555) 019-2834"
+              placeholder="e.g. +1 555 019 2834 or your phone number"
               required
               className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-dark-text placeholder-dark-muted focus:outline-none focus:border-brand-primary transition-colors"
             />

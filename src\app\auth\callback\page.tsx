@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { REALTIME_CHANNEL } from '@/lib/realtime';
 import { CompleteProfileModal } from '@/components/CompleteProfileModal';
 import { PendingApprovalScreen } from '@/components/PendingApprovalScreen';
 import { Sparkles, Loader2 } from 'lucide-react';
@@ -116,6 +117,51 @@ export default function AuthCallbackPage() {
       console.error(err);
     }
   };
+
+  // Instant real-time listener & 1.5s auto-poll: auto-redirect the instant Admin approves!
+  useEffect(() => {
+    if (step !== 'pending' || !agentData?.email) return;
+
+    const channel = supabase.channel(REALTIME_CHANNEL, {
+      config: { broadcast: { self: true } }
+    });
+
+    channel
+      .on('broadcast', { event: 'agent_approved' }, (payload: unknown) => {
+        const raw = (payload as Record<string, unknown>)?.payload || payload;
+        const approvedEmail = (raw as Record<string, unknown>)?.agentEmail as string;
+        const approvedAgent = (raw as Record<string, unknown>)?.agent;
+        if (approvedEmail && approvedEmail.toLowerCase() === agentData.email.toLowerCase()) {
+          if (approvedAgent) {
+            localStorage.setItem('teals_agent_session', JSON.stringify(approvedAgent));
+          }
+          router.push('/dashboard');
+        }
+      })
+      .subscribe();
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/agent/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: agentData.email })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status === 'approved') {
+            localStorage.setItem('teals_agent_session', JSON.stringify(data.agent));
+            router.push('/dashboard');
+          }
+        }
+      } catch {}
+    }, 1500);
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(channel);
+    };
+  }, [step, agentData?.email, router]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();

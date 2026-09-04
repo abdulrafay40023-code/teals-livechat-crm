@@ -140,18 +140,18 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             };
           });
 
-          setSavedConversations(prev => {
-            const map = new Map<string, SavedConvSummary>();
-            mapped.forEach(c => map.set(c.id, c));
-            prev.forEach(c => {
-              if (!map.has(c.id)) map.set(c.id, c);
-            });
-            const merged = Array.from(map.values());
-            try {
-              localStorage.setItem('teals_visitor_conv_list', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
+          setSavedConversations(mapped);
+          try {
+            localStorage.setItem('teals_visitor_conv_list', JSON.stringify(mapped));
+          } catch {}
+        } else {
+          setSavedConversations([]);
+          setHasSubmittedLead(false);
+          setViewingHistory(false);
+          try {
+            localStorage.removeItem('teals_visitor_conv_list');
+            localStorage.removeItem('teals_lead_submitted');
+          } catch {}
         }
       }
     } catch {}
@@ -165,18 +165,24 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       const submitted = localStorage.getItem('teals_lead_submitted');
       if (savedName) setUserName(savedName);
       if (savedEmail) setUserEmail(savedEmail);
-      if (savedName && savedEmail && submitted === 'true') {
-        setHasSubmittedLead(true);
-        setViewingHistory(true);
-      } else {
-        setHasSubmittedLead(false);
-      }
 
       const rawConvList = localStorage.getItem('teals_visitor_conv_list');
-      if (rawConvList) {
-        setSavedConversations(JSON.parse(rawConvList));
+      const parsedConvs: SavedConvSummary[] = rawConvList ? JSON.parse(rawConvList) : [];
+      setSavedConversations(parsedConvs);
+
+      const hasRealConversations = parsedConvs.length > 0 && parsedConvs.some(c => c.lastMessage && c.lastMessage !== DEFAULT_GREETING);
+
+      if (savedName && savedEmail && submitted === 'true' && hasRealConversations) {
+        setHasSubmittedLead(true);
+        setViewingHistory(false);
+      } else {
+        setHasSubmittedLead(false);
+        setViewingHistory(false);
       }
-    } catch {}
+    } catch {
+      setHasSubmittedLead(false);
+      setViewingHistory(false);
+    }
   }, []);
 
   // Auto-save current conversation to the list whenever messages update
@@ -602,7 +608,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     });
 
     setHasSubmittedLead(true);
-    setViewingHistory(true);
+    setViewingHistory(false);
 
     fetchVisitorConversations(targetConvId, cleanEmail);
 
@@ -675,6 +681,12 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   // Start a brand new conversation and preserve old ones (Max 2 chats limit)
   const handleStartNewChat = async () => {
+    // If user hasn't submitted lead info yet, open the lead form
+    if (!hasSubmittedLead) {
+      setViewingHistory(false);
+      return;
+    }
+
     if (savedConversations.length >= 2) {
       setShowChatLimitModal(true);
       return;
@@ -1123,54 +1135,68 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
               {/* Conversations List */}
               <div className="flex-1 p-3 space-y-2 overflow-y-auto">
                 <h4 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-1 mb-2">Your Conversations</h4>
-                {(savedConversations.length > 0 ? savedConversations : [
-                  {
-                    id: conversationId || 'conv_default',
-                    lastMessage: DEFAULT_GREETING,
-                    updatedAt: 'Just now'
-                  }
-                ]).map((c, idx) => {
-                  const isCurrent = c.id === conversationId;
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => isCurrent ? setViewingHistory(false) : handleSelectOldChat(c.id)}
-                      className={`flex items-center space-x-3 p-3 rounded-xl cursor-pointer transition-all border ${
-                        isCurrent 
-                          ? 'bg-blue-950/40 border-blue-600/50 shadow-sm' 
-                          : 'bg-[#131b2e] border-gray-800 hover:border-gray-700 hover:bg-[#18233c]'
-                      }`}
-                    >
-                      {/* Avatar */}
-                      <div className="flex-shrink-0 relative">
-                        <AgentAvatar type="ai" name="" size="md" />
-                        <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-brand-emerald rounded-full border border-[#131b2e]" />
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-white flex items-center space-x-1.5">
-                            <span>{`Chat #${(savedConversations.length || 1) - idx}`}</span>
-                            {isCurrent && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold">
-                                Active
-                              </span>
-                            )}
-                          </span>
-                          <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{c.updatedAt || 'Just now'}</span>
-                        </div>
-                        <div className="flex items-center space-x-1 mt-0.5">
-                          {isCurrent && <MessageSquare className="w-3 h-3 text-blue-400 flex-shrink-0" />}
-                          <p className="text-[11px] text-gray-300 truncate">{c.lastMessage || DEFAULT_GREETING}</p>
-                        </div>
-                      </div>
-
-                      {/* Arrow */}
-                      <ArrowRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                {savedConversations.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-gray-400 space-y-3 my-12">
+                    <div className="w-10 h-10 rounded-xl bg-blue-600/15 border border-blue-500/20 flex items-center justify-center text-blue-400 mx-auto">
+                      <MessageSquare className="w-5 h-5" />
                     </div>
-                  );
-                })}
+                    <p className="text-xs text-gray-300 font-medium">No previous conversations</p>
+                    <p className="text-[11px] text-gray-500">Start a new conversation to connect with support.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHasSubmittedLead(false);
+                        setViewingHistory(false);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow-md cursor-pointer"
+                    >
+                      Start New Chat
+                    </button>
+                  </div>
+                ) : (
+                  savedConversations.map((c, idx) => {
+                    const isCurrent = c.id === conversationId;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => isCurrent ? setViewingHistory(false) : handleSelectOldChat(c.id)}
+                        className={`flex items-center space-x-3 p-3 rounded-xl cursor-pointer transition-all border ${
+                          isCurrent 
+                            ? 'bg-blue-950/40 border-blue-600/50 shadow-sm' 
+                            : 'bg-[#131b2e] border-gray-800 hover:border-gray-700 hover:bg-[#18233c]'
+                        }`}
+                      >
+                        {/* Avatar */}
+                        <div className="flex-shrink-0 relative">
+                          <AgentAvatar type="ai" name="" size="md" />
+                          <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-brand-emerald rounded-full border border-[#131b2e]" />
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                              <span>{`Chat #${savedConversations.length - idx}`}</span>
+                              {isCurrent && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-semibold">
+                                  Active
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-[10px] text-gray-400 flex-shrink-0 ml-2">{c.updatedAt || 'Just now'}</span>
+                          </div>
+                          <div className="flex items-center space-x-1 mt-0.5">
+                            {isCurrent && <MessageSquare className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+                            <p className="text-[11px] text-gray-300 truncate">{c.lastMessage || DEFAULT_GREETING}</p>
+                          </div>
+                        </div>
+
+                        {/* Arrow */}
+                        <ArrowRight className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
               {/* Start new chat card at the BOTTOM */}

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { granularStore } from '@/lib/store';
+import { broadcastRealtimeEvent } from '@/lib/realtime';
 
 export async function GET() {
   try {
@@ -29,6 +30,14 @@ export async function POST(req: NextRequest) {
     if (targetAgent) {
       targetAgent.status = action === 'approve' ? 'approved' : 'rejected';
       await granularStore.saveAgent(targetAgent);
+
+      if (action === 'approve') {
+        broadcastRealtimeEvent('agent_approved', {
+          agentId: targetAgent.id,
+          agentEmail: targetAgent.email,
+          agent: targetAgent
+        }).catch(() => {});
+      }
     }
 
     return NextResponse.json({
