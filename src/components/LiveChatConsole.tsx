@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare, Send,
   Lock, UserPlus, MapPin, Eye, ShieldAlert, Bot, Trash2,
-  Sparkles, UserCheck, ArrowRightLeft, X
+  UserCheck, ArrowRightLeft, X
 } from 'lucide-react';
 import { AgentAvatar } from '@/components/AgentAvatar';
 import { getCountryFlagUrl } from '@/lib/flags';
@@ -74,7 +74,7 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [claimError, setClaimError] = useState<string | null>(null);
   const [liveTypingPreview, setLiveTypingPreview] = useState<string | null>(null);
-  const [inboxTab, setInboxTab] = useState<'all' | 'new' | 'claimed'>('all');
+  const [inboxTab, setInboxTab] = useState<'chat1' | 'chat2' | 'locked' | 'claimed'>('chat1');
   const [transferModalOpen, setTransferModalOpen] = useState(false);
   const [transferAgentName, setTransferAgentName] = useState('');
   const [transferAgentEmail, setTransferAgentEmail] = useState('');
@@ -130,10 +130,6 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     return getLatestTime(b) - getLatestTime(a);
   });
 
-  // Separate into New Unclaimed Chats vs Active & Claimed Chats
-  const newChats = sortedVisibleConversations.filter(c => !c.assigned_agent_id && !c.assigned_agent_name);
-  const claimedChats = sortedVisibleConversations.filter(c => !!(c.assigned_agent_id || c.assigned_agent_name));
-
   // Map to identify which chat number a conversation is when visitor has multiple
   const emailToConvs = new Map<string, ChatSession[]>();
   sortedVisibleConversations.forEach(c => {
@@ -142,14 +138,31 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     emailToConvs.get(key)!.push(c);
   });
 
+  const getChatNumber = (conv: ChatSession): 1 | 2 => {
+    const key = (conv.visitor_email || conv.visitor_name || conv.id).toLowerCase();
+    const group = emailToConvs.get(key) || [];
+    if (group.length <= 1) return 1;
+    const sortedChronological = [...group].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    const idx = sortedChronological.findIndex(c => c.id === conv.id);
+    return idx === 0 ? 1 : 2;
+  };
+
   const getChatBadge = (conv: ChatSession) => {
     const key = (conv.visitor_email || conv.visitor_name || conv.id).toLowerCase();
     const group = emailToConvs.get(key) || [];
     if (group.length <= 1) return null;
-    const sortedChronological = [...group].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
-    const idx = sortedChronological.findIndex(c => c.id === conv.id);
-    return idx >= 0 ? `Chat #${idx + 1}` : null;
+    return `Chat #${getChatNumber(conv)}`;
   };
+
+  // 4 Core Categorized Lists as requested by User (All tab removed):
+  // 1. Chat 1: Initial / first chats of visitors
+  const chat1List = sortedVisibleConversations.filter(c => getChatNumber(c) === 1);
+  // 2. Chat 2: Newly started 2nd chats of visitors
+  const chat2List = sortedVisibleConversations.filter(c => getChatNumber(c) === 2);
+  // 3. Locked: Visitors who requested human assistance, awaiting agent claim
+  const lockedList = sortedVisibleConversations.filter(c => !c.assigned_agent_id && !c.assigned_agent_name && (c.mode === 'human' || c.status === 'pending_agent'));
+  // 4. Claimed: Chats claimed by live agents
+  const claimedList = sortedVisibleConversations.filter(c => !!(c.assigned_agent_id || c.assigned_agent_name));
 
   // Calculate unread count for each conversation
   const getUnreadCountForConv = (conv: ChatSession) => {
@@ -179,6 +192,12 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
     }
     return visitorMsgs.length;
   };
+
+  // Tab unread notification counts (seen kro tu gayab)
+  const chat1Unread = chat1List.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
+  const chat2Unread = chat2List.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
+  const lockedUnread = lockedList.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
+  const claimedUnread = claimedList.reduce((sum, c) => sum + getUnreadCountForConv(c), 0);
 
   const handleDeleteChat = async (id: string) => {
     if (!window.confirm('Are you sure you want to permanently delete this chat?')) return;
@@ -776,8 +795,9 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
                 <span>{conv.assigned_agent_name || 'Claimed'}</span>
               </span>
             ) : isConvNeedsClaim ? (
-              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-rose/15 text-brand-rose border border-brand-rose/30 animate-pulse">
-                NEEDS CLAIM
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-brand-rose/15 text-brand-rose border border-brand-rose/30 animate-pulse flex items-center space-x-1">
+                <Lock className="w-2.5 h-2.5" />
+                <span>LOCKED</span>
               </span>
             ) : (
               <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center space-x-1">
@@ -821,124 +841,166 @@ const sortTimelineMessages = <T extends { id?: string; seq?: number; created_at?
             </span>
           </div>
 
-          {/* New Chats vs Claimed Filter Tabs */}
-          <div className="flex items-center space-x-1 p-2 bg-[#080d1a] border-b border-dark-border">
+          {/* 4 Clean Filter Tabs: Chat 1, Chat 2, Locked, Claimed */}
+          <div className="grid grid-cols-4 gap-1 p-1.5 bg-[#080d1a] border-b border-dark-border">
+            {/* 1. Chat 1 Tab */}
             <button
               type="button"
-              onClick={() => setInboxTab('all')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
-                inboxTab === 'all'
+              onClick={() => setInboxTab('chat1')}
+              className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'chat1'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-dark-muted hover:text-white hover:bg-dark-surface'
               }`}
             >
-              <span>All</span>
-              <span className="text-[10px] px-1 rounded-full bg-white/20">
-                {sortedVisibleConversations.length}
-              </span>
+              <span className="text-[11px] truncate">Chat 1</span>
+              {chat1Unread > 0 ? (
+                <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
+                  {chat1Unread}
+                </span>
+              ) : (
+                <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
+                  {chat1List.length}
+                </span>
+              )}
             </button>
+
+            {/* 2. Chat 2 Tab */}
             <button
               type="button"
-              onClick={() => setInboxTab('new')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
-                inboxTab === 'new'
+              onClick={() => setInboxTab('chat2')}
+              className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'chat2'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-dark-muted hover:text-white hover:bg-dark-surface'
               }`}
             >
-              <Sparkles className="w-3 h-3 text-blue-400" />
-              <span>New</span>
-              <span className="text-[10px] px-1 rounded-full bg-blue-500/20 text-blue-300">
-                {newChats.length}
-              </span>
+              <span className="text-[11px] truncate">Chat 2</span>
+              {chat2Unread > 0 ? (
+                <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
+                  {chat2Unread}
+                </span>
+              ) : (
+                <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
+                  {chat2List.length}
+                </span>
+              )}
             </button>
+
+            {/* 3. Locked Tab */}
+            <button
+              type="button"
+              onClick={() => setInboxTab('locked')}
+              className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+                inboxTab === 'locked'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-dark-muted hover:text-white hover:bg-dark-surface'
+              }`}
+            >
+              <Lock className="w-3 h-3 text-amber-400 flex-shrink-0" />
+              <span className="text-[11px] truncate">Locked</span>
+              {lockedList.length > 0 ? (
+                <span className="min-w-[17px] h-[17px] px-1 bg-amber-500 text-dark-bg text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-amber-500/50">
+                  {lockedList.length}
+                </span>
+              ) : (
+                <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
+                  0
+                </span>
+              )}
+            </button>
+
+            {/* 4. Claimed Tab */}
             <button
               type="button"
               onClick={() => setInboxTab('claimed')}
-              className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
+              className={`py-1.5 px-1 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1 ${
                 inboxTab === 'claimed'
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-dark-muted hover:text-white hover:bg-dark-surface'
               }`}
             >
-              <UserCheck className="w-3 h-3 text-emerald-400" />
-              <span>Claimed</span>
-              <span className="text-[10px] px-1 rounded-full bg-emerald-500/20 text-emerald-300">
-                {claimedChats.length}
-              </span>
+              <UserCheck className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+              <span className="text-[11px] truncate">Claimed</span>
+              {claimedUnread > 0 ? (
+                <span className="min-w-[17px] h-[17px] px-1 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center animate-pulse shadow-sm shadow-rose-500/50">
+                  {claimedUnread}
+                </span>
+              ) : (
+                <span className="text-[10px] px-1 rounded-full bg-white/10 text-gray-400">
+                  {claimedList.length}
+                </span>
+              )}
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto divide-y divide-dark-border/40">
-            {sortedVisibleConversations.length === 0 ? (
-              <div className="p-8 text-center text-xs text-dark-muted space-y-2">
-                <AgentAvatar type="ai" size="md" className="mx-auto" />
-                <p className="font-semibold text-white">No pending chats</p>
-                <p className="text-[11px] leading-relaxed">
-                  {isAdmin
-                    ? 'Visitors chatting on CRM will appear here.'
-                    : 'When a visitor requests a human agent, it will alert and appear here!'}
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* 1. All Tab View with Section Dividers */}
-                {inboxTab === 'all' && (
-                  <>
-                    {newChats.length > 0 && (
-                      <div className="bg-[#0b1220]">
-                        <div className="px-3.5 py-1.5 bg-[#0e1628] border-b border-dark-border/60 flex items-center justify-between text-[10px] font-bold text-blue-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                          <div className="flex items-center space-x-1.5">
-                            <Sparkles className="w-3 h-3 text-blue-400" />
-                            <span>New Chats ({newChats.length})</span>
-                          </div>
-                          <span className="text-[9px] text-gray-400 font-normal lowercase">Awaiting / AI</span>
-                        </div>
-                        <div className="divide-y divide-dark-border/30">
-                          {newChats.map(renderConvItem)}
-                        </div>
-                      </div>
-                    )}
+            {/* 1. Chat 1 List */}
+            {inboxTab === 'chat1' && (
+              chat1List.length === 0 ? (
+                <div className="p-8 text-center text-xs text-dark-muted space-y-2">
+                  <AgentAvatar type="ai" size="md" className="mx-auto" />
+                  <p className="font-semibold text-white">No Chat 1 conversations</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Initial conversations from visitors will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-border/30">
+                  {chat1List.map(renderConvItem)}
+                </div>
+              )
+            )}
 
-                    {claimedChats.length > 0 && (
-                      <div className="bg-[#0b1220]">
-                        <div className="px-3.5 py-1.5 bg-[#0e1628] border-b border-dark-border/60 flex items-center justify-between text-[10px] font-bold text-emerald-400 uppercase tracking-wider sticky top-0 z-10 shadow-sm">
-                          <div className="flex items-center space-x-1.5">
-                            <UserCheck className="w-3 h-3 text-emerald-400" />
-                            <span>Active & Claimed ({claimedChats.length})</span>
-                          </div>
-                          <span className="text-[9px] text-gray-400 font-normal lowercase">In Progress</span>
-                        </div>
-                        <div className="divide-y divide-dark-border/30">
-                          {claimedChats.map(renderConvItem)}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
+            {/* 2. Chat 2 List */}
+            {inboxTab === 'chat2' && (
+              chat2List.length === 0 ? (
+                <div className="p-8 text-center text-xs text-dark-muted space-y-2">
+                  <AgentAvatar type="ai" size="md" className="mx-auto" />
+                  <p className="font-semibold text-white">No Chat 2 conversations</p>
+                  <p className="text-[11px] leading-relaxed">
+                    When visitors click &quot;Start a New Conversation&quot;, their 2nd chat will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-border/30">
+                  {chat2List.map(renderConvItem)}
+                </div>
+              )
+            )}
 
-                {/* 2. New Tab View */}
-                {inboxTab === 'new' && (
-                  newChats.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-dark-muted">No new unassigned chats</div>
-                  ) : (
-                    <div className="divide-y divide-dark-border/30">
-                      {newChats.map(renderConvItem)}
-                    </div>
-                  )
-                )}
+            {/* 3. Locked List (Awaiting Human Agent Claim) */}
+            {inboxTab === 'locked' && (
+              lockedList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-dark-muted space-y-2">
+                  <Lock className="w-8 h-8 text-dark-muted mx-auto opacity-50" />
+                  <p className="font-semibold text-white">No locked chats</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Chats where visitors ask for a real human agent will lock and appear here for claim.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-border/30">
+                  {lockedList.map(renderConvItem)}
+                </div>
+              )
+            )}
 
-                {/* 3. Claimed Tab View */}
-                {inboxTab === 'claimed' && (
-                  claimedChats.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-dark-muted">No claimed chats yet</div>
-                  ) : (
-                    <div className="divide-y divide-dark-border/30">
-                      {claimedChats.map(renderConvItem)}
-                    </div>
-                  )
-                )}
-              </>
+            {/* 4. Claimed List */}
+            {inboxTab === 'claimed' && (
+              claimedList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-dark-muted space-y-2">
+                  <UserCheck className="w-8 h-8 text-dark-muted mx-auto opacity-50" />
+                  <p className="font-semibold text-white">No claimed chats</p>
+                  <p className="text-[11px] leading-relaxed">
+                    Chats claimed by live support agents will appear here.
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-dark-border/30">
+                  {claimedList.map(renderConvItem)}
+                </div>
+              )
             )}
           </div>
         </div>
