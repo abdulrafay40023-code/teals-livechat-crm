@@ -35,6 +35,19 @@ export async function POST(req: NextRequest) {
       ? propertySlug
       : detectWebsiteSlugFromUrl(currentPage || refererHeader);
 
+    // Completely ignore CRM traffic (salesflow-ai, teals-crm, etc.) as requested
+    const isCrmTraffic = !effectiveSlug || effectiveSlug === 'teals-crm' ||
+      (currentPage && (currentPage.includes('salesflow-ai') || currentPage.includes('teals-livechat'))) ||
+      (refererHeader && (refererHeader.includes('salesflow-ai') || refererHeader.includes('teals-livechat')));
+
+    if (isCrmTraffic) {
+      return NextResponse.json({
+        success: true,
+        tracked: false,
+        message: 'CRM traffic ignored'
+      });
+    }
+
     const sid = sessionId || ('tab_' + Math.random().toString(36).substring(2, 10));
     const token = visitorToken || sid;
 

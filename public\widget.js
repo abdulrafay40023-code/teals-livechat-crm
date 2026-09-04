@@ -14,6 +14,12 @@
     } catch (e) {}
   }
 
+  var currentHost = (window.location.hostname || '').toLowerCase();
+  // Disable widget and tracking on CRM / salesflow-ai / teals portal sites
+  if (currentHost.indexOf('salesflow-ai') !== -1 || currentHost.indexOf('teals-livechat') !== -1) {
+    return;
+  }
+
   function detectSlugFromHostname(hostname) {
     var h = (hostname || '').toLowerCase();
     if (h.indexOf('amzsolutionshub.com') !== -1) return 'amz-solutions-hub';
