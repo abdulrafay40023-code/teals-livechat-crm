@@ -11,6 +11,15 @@ import {
   flushPending,
 } from '@/lib/audio';
 
+const ADMIN_EMAILS = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+
+const checkIsAdmin = (user?: { role?: string; email?: string } | null): boolean => {
+  if (!user) return true;
+  if (user.role === 'admin') return true;
+  const email = (user.email || '').toLowerCase().trim();
+  return ADMIN_EMAILS.includes(email) || email.includes('garry') || email.includes('tzafar') || email.includes('annus');
+};
+
 export interface LiveVisitor {
   id: string;
   visitor_token: string;
@@ -156,7 +165,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         if (rawSession) currentUser = JSON.parse(rawSession);
       } catch {}
     }
-    const isAdm = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com';
+    const isAdm = checkIsAdmin(currentUser);
 
     return convList.filter(c => {
       // For working agents: only consider chats they can access (claimed by them or pending human pickup)
@@ -432,7 +441,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           if (rawSession) currentUser = JSON.parse(rawSession);
         } catch {}
 
-        const isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com' || currentUser.email?.includes('garry');
+        const isAdmin = checkIsAdmin(currentUser);
         const isMyClaimedChat = conversation && conversation.assigned_agent_id === currentUser?.id;
         const isHandoffEvent = isHandoffRequested || conversation?.status === 'pending_agent';
         const isVisitorMsg = message && message.sender_type === 'visitor';
@@ -647,7 +656,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const rawSession = localStorage.getItem('teals_agent_session');
           if (rawSession) currentUser = JSON.parse(rawSession);
         } catch {}
-        const isAdmin = !currentUser || currentUser.role === 'admin' || currentUser.email === 'garryamelia6265@gmail.com' || currentUser.email?.includes('garry');
+        const isAdmin = checkIsAdmin(currentUser);
 
         if (isAdmin) {
           if (soundEnabledRef.current) {

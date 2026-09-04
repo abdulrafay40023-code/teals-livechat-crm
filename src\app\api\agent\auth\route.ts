@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { memoryStore, granularStore, StoreAgent } from '@/lib/store';
+import { memoryStore, granularStore, StoreAgent, ADMIN_EMAILS } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
-
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'garryamelia6265@gmail.com';
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +12,7 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const isAdmin = cleanEmail === ADMIN_EMAIL.toLowerCase();
+    const isAdmin = ADMIN_EMAILS.includes(cleanEmail) || cleanEmail === (process.env.ADMIN_EMAIL || '').toLowerCase();
 
     // Check Memory Store
     let agent = memoryStore.agents.get(cleanEmail);
@@ -24,8 +22,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Full name and phone number required' }, { status: 400 });
       }
 
+      let adminId = 'agent_' + Math.random().toString(36).substring(2, 9);
+      if (cleanEmail === 'garryamelia6265@gmail.com') adminId = 'agent_garry_admin';
+      else if (cleanEmail === 'tzafar04@gmail.com') adminId = 'agent_tzafar_admin';
+      else if (cleanEmail === 'annusraees@gmail.com') adminId = 'agent_annus_admin';
+
       const newAgent: StoreAgent = {
-        id: 'agent_' + Math.random().toString(36).substring(2, 9),
+        id: adminId,
         email: cleanEmail,
         full_name: fullName,
         phone: phone,
@@ -64,10 +67,23 @@ export async function POST(req: NextRequest) {
 
     if (!agent) {
       if (isAdmin) {
+        let name = 'Admin';
+        let id = 'agent_admin';
+        if (cleanEmail === 'garryamelia6265@gmail.com') {
+          name = 'Garry Amelia';
+          id = 'agent_garry_admin';
+        } else if (cleanEmail === 'tzafar04@gmail.com') {
+          name = 'T Zafar';
+          id = 'agent_tzafar_admin';
+        } else if (cleanEmail === 'annusraees@gmail.com') {
+          name = 'Annus Raees';
+          id = 'agent_annus_admin';
+        }
+
         const adminAgent: StoreAgent = {
-          id: 'agent_garry_admin',
+          id,
           email: cleanEmail,
-          full_name: 'Garry Amelia',
+          full_name: name,
           phone: '+1 (555) 019-2834',
           role: 'admin',
           status: 'approved',
@@ -76,6 +92,10 @@ export async function POST(req: NextRequest) {
           created_at: new Date().toISOString()
         };
         memoryStore.agents.set(cleanEmail, adminAgent);
+        try {
+          await granularStore.saveAgent(adminAgent);
+        } catch {}
+
         return NextResponse.json({
           agent: adminAgent,
           status: 'approved',
@@ -89,6 +109,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (isAdmin) {
+      agent.role = 'admin';
+      agent.status = 'approved';
+    }
     agent.is_online = true;
     agent.last_seen_at = new Date().toISOString();
 

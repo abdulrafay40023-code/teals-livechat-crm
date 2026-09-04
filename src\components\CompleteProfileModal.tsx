@@ -49,7 +49,7 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
         <div className="text-center mb-6">
           <h2 className="text-xl font-black text-dark-text tracking-tight">Complete Agent Profile</h2>
           <p className="text-xs text-dark-muted mt-2">
-            Please enter your details to send an access request to Garry Amelia (Admin).
+            Please enter your details to send an access request to the CRM Administrators.
           </p>
         </div>
 

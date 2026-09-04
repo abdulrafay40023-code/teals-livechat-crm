@@ -19,7 +19,8 @@ export default function LoginPage() {
         if (rawSession) {
           try {
             const parsed = JSON.parse(rawSession);
-            if (parsed?.status === 'approved' || parsed?.role === 'admin') {
+            const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+            if (parsed?.status === 'approved' || parsed?.role === 'admin' || (parsed?.email && adminEmails.includes(parsed.email.toLowerCase()))) {
               router.push('/dashboard');
             }
           } catch {

@@ -52,7 +52,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     }
   }, [router]);
 
-  const isAdmin = currentAgent?.role === 'admin' || currentAgent?.email === 'garryamelia6265@gmail.com';
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const isAdmin = currentAgent?.role === 'admin' || (currentAgent?.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
   useEffect(() => {
     if (!isAdmin) return;

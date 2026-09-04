@@ -69,6 +69,18 @@ export interface StoreAgent {
   created_at: string;
 }
 
+export const ADMIN_EMAILS: string[] = [
+  'garryamelia6265@gmail.com',
+  'tzafar04@gmail.com',
+  'annusraees@gmail.com'
+];
+
+export function isUserAdmin(email?: string | null, role?: string | null): boolean {
+  if (role === 'admin') return true;
+  if (!email) return false;
+  return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
 function sanitizeKey(k: string): string {
   return (k || '').replace(/[^a-zA-Z0-9_-]/g, '_');
 }
@@ -137,20 +149,42 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
 };
 
 class GranularStore {
-  private sessionCache = new Map<string, StoreVisitorSession>();
-  private convCache = new Map<string, StoreConversation>();
-  public agents = new Map<string, StoreAgent>();
-  private todayIps = new Map<string, Set<string>>();
-  private allTimeIps = new Set<string>();
+  readonly sessionCache = new Map<string, StoreVisitorSession>();
+  readonly convCache = new Map<string, StoreConversation>();
+  readonly agents = new Map<string, StoreAgent>();
+  allTimeIps = new Set<string>();
+  readonly todayIps = new Map<string, Set<string>>();
   private totalViews = 0;
   private storageLoaded = false;
 
   constructor() {
-    const admin: StoreAgent = {
+    const adminGarry: StoreAgent = {
       id: 'agent_garry_admin',
       email: 'garryamelia6265@gmail.com',
       full_name: 'Garry Amelia',
       phone: '+1 (555) 019-2834',
+      role: 'admin',
+      status: 'approved',
+      is_online: true,
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+    const adminTzafar: StoreAgent = {
+      id: 'agent_tzafar_admin',
+      email: 'tzafar04@gmail.com',
+      full_name: 'T Zafar',
+      phone: '+1 (555) 019-2835',
+      role: 'admin',
+      status: 'approved',
+      is_online: true,
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
+    const adminAnnus: StoreAgent = {
+      id: 'agent_annus_admin',
+      email: 'annusraees@gmail.com',
+      full_name: 'Annus Raees',
+      phone: '+1 (555) 019-2836',
       role: 'admin',
       status: 'approved',
       is_online: true,
@@ -168,7 +202,9 @@ class GranularStore {
       last_seen_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
-    this.agents.set(admin.email.toLowerCase(), admin);
+    this.agents.set(adminGarry.email.toLowerCase(), adminGarry);
+    this.agents.set(adminTzafar.email.toLowerCase(), adminTzafar);
+    this.agents.set(adminAnnus.email.toLowerCase(), adminAnnus);
     this.agents.set(agent.email.toLowerCase(), agent);
   }
 
@@ -469,6 +505,10 @@ class GranularStore {
               const text = await parseStorageData(data);
               if (text) {
                 const a: StoreAgent = JSON.parse(text);
+                if (ADMIN_EMAILS.includes(a.email.toLowerCase())) {
+                  a.role = 'admin';
+                  a.status = 'approved';
+                }
                 this.agents.set(a.email.toLowerCase(), a);
               }
             }
@@ -476,15 +516,34 @@ class GranularStore {
         }));
       }
     } catch {}
+
+    // Ensure all 3 admins are always present and approved as admin
+    for (const email of ADMIN_EMAILS) {
+      const existing = this.agents.get(email.toLowerCase());
+      if (existing) {
+        existing.role = 'admin';
+        existing.status = 'approved';
+      }
+    }
+
     return Array.from(this.agents.values());
   }
 
   async getAgent(agentId: string): Promise<StoreAgent | null> {
     const all = await this.getAllAgents();
-    return all.find(a => a.id === agentId || a.email.toLowerCase() === agentId.toLowerCase()) || null;
+    const found = all.find(a => a.id === agentId || a.email.toLowerCase() === agentId.toLowerCase()) || null;
+    if (found && ADMIN_EMAILS.includes(found.email.toLowerCase())) {
+      found.role = 'admin';
+      found.status = 'approved';
+    }
+    return found;
   }
 
   async saveAgent(agent: StoreAgent): Promise<void> {
+    if (ADMIN_EMAILS.includes(agent.email.toLowerCase())) {
+      agent.role = 'admin';
+      agent.status = 'approved';
+    }
     this.agents.set(agent.email.toLowerCase(), agent);
     try {
       const key = `agents/${sanitizeKey(agent.id)}.json`;

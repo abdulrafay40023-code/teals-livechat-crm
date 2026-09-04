@@ -80,7 +80,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="text-left hidden sm:block">
               <div className="flex items-center space-x-1.5">
                 <span className="text-xs font-bold text-white">{currentAgent.full_name}</span>
-                {currentAgent.role === 'admin' && (
+                {(currentAgent.role === 'admin' || ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'].includes(currentAgent.email?.toLowerCase() || '')) && (
                   <span className="text-[10px] bg-brand-amber/15 text-brand-amber px-1.5 py-0.2 rounded font-bold border border-brand-amber/30">
                     Admin
                   </span>

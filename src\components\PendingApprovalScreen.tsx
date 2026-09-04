@@ -53,7 +53,7 @@ export const PendingApprovalScreen: React.FC<PendingApprovalScreenProps> = ({
           Access Requires Admin Approval
         </h2>
         <p className="text-xs text-dark-muted mt-2 max-w-sm mx-auto leading-relaxed">
-          Your request has been submitted. As soon as Garry Amelia (Admin) approves your request in Settings, you will automatically get access to your dashboard.
+          Your request has been submitted. As soon as a CRM Administrator approves your request in Settings, you will automatically get access to your dashboard.
         </p>
 
         {/* Applicant Details Box */}

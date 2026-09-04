@@ -19,7 +19,14 @@ export default function ChatsPage() {
     if (typeof window !== 'undefined') {
       try {
         const rawSession = localStorage.getItem('teals_agent_session');
-        if (rawSession) return JSON.parse(rawSession);
+        if (rawSession) {
+          const parsed = JSON.parse(rawSession);
+          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+          if (parsed?.email && adminEmails.includes(parsed.email.toLowerCase())) {
+            parsed.role = 'admin';
+          }
+          return parsed;
+        }
       } catch {}
     }
     return { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' };
