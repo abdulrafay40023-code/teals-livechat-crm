@@ -42,9 +42,8 @@ const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING,
     }
     const isGreet = m.sender_type === 'ai' && (
       m.id === 'init-greet' || 
-      m.id?.startsWith?.('init-greet') || 
-      (m.content || '').toLowerCase().includes('how can i help') || 
-      (m.content || '').toLowerCase().includes('welcome to')
+      m.id?.startsWith?.('init-greet') ||
+      (m.seq === 1 && m.created_at === '1970-01-01T00:00:00.000Z')
     );
     if (isGreet) {
       if (seenGreet) return;
@@ -58,7 +57,8 @@ const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING,
       });
       return;
     }
-    map.set(m.id, m);
+    const msgId = m.id || ('msg_' + Math.random().toString(36).substring(2, 9));
+    map.set(msgId, { ...m, id: msgId });
   });
 
   if (!seenGreet) {

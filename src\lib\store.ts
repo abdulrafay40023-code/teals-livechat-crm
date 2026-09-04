@@ -124,8 +124,8 @@ export const sortMessagesChronologically = <T extends { id?: string; created_at?
 
   const sorted = list.sort((a, b) => {
     // 1. Initial AI Greeting always comes first
-    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && (a.seq === 1 || (a.content || '').includes('Hey! How can I help') || (a.content || '').includes('Welcome to')));
-    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && (b.seq === 1 || (b.content || '').includes('Hey! How can I help') || (b.content || '').includes('Welcome to')));
+    const isAiGreetA = a.id === 'init-greet' || (a.sender_type === 'ai' && a.seq === 1 && a.created_at === '1970-01-01T00:00:00.000Z');
+    const isAiGreetB = b.id === 'init-greet' || (b.sender_type === 'ai' && b.seq === 1 && b.created_at === '1970-01-01T00:00:00.000Z');
     if (isAiGreetA && !isAiGreetB) return -1;
     if (!isAiGreetA && isAiGreetB) return 1;
 
