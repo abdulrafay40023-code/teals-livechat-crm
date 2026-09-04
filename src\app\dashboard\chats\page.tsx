@@ -6,7 +6,7 @@ import { useLiveSync } from '@/context/LiveSyncContext';
 import { getAllWebsites, getWebsiteConfig } from '@/lib/websites-config';
 import {
   Globe, ShoppingCart, Rocket, BookOpen, PenTool, BookMarked,
-  ExternalLink, Layers
+  ExternalLink, Layers, ArrowRight, ArrowLeft, MessageSquare
 } from 'lucide-react';
 
 export default function ChatsPage() {
@@ -42,15 +42,8 @@ export default function ChatsPage() {
     return null;
   });
 
-  const [selectedWebsiteSlug, setSelectedWebsiteSlug] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('teals_active_website_tab');
-        if (saved && saved !== 'all') return saved;
-      } catch {}
-    }
-    return 'amz-solutions-hub';
-  });
+  // Default to null so the user is never forced into any section automatically on entry
+  const [selectedWebsiteSlug, setSelectedWebsiteSlug] = useState<string | null>(null);
 
   const { conversations, refreshSync, markConversationAsRead, readConvMap } = useLiveSync();
 
@@ -73,9 +66,6 @@ export default function ChatsPage() {
 
   const handleSelectWebsiteTab = (slug: string) => {
     setSelectedWebsiteSlug(slug);
-    try {
-      localStorage.setItem('teals_active_website_tab', slug);
-    } catch {}
   };
 
   const websites = getAllWebsites();
@@ -100,11 +90,11 @@ export default function ChatsPage() {
     return { count: list.length, unread };
   };
 
-  const filteredConversations = conversations.filter(c => {
+  const filteredConversations = selectedWebsiteSlug ? conversations.filter(c => {
     return (c.property_slug || 'amz-solutions-hub') === selectedWebsiteSlug;
-  });
+  }) : [];
 
-  const activeSiteConfig = getWebsiteConfig(selectedWebsiteSlug);
+  const activeSiteConfig = selectedWebsiteSlug ? getWebsiteConfig(selectedWebsiteSlug) : null;
 
   const getWebsiteIcon = (slug: string) => {
     switch (slug) {
@@ -148,6 +138,14 @@ export default function ChatsPage() {
               <span>{activeSiteConfig.domain}</span>
               <ExternalLink className="w-2.5 h-2.5" />
             </a>
+            <span className="text-dark-muted">•</span>
+            <button
+              onClick={() => setSelectedWebsiteSlug(null)}
+              className="px-2 py-0.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white border border-gray-700 text-[11px] font-medium flex items-center space-x-1 transition-colors"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              <span>All Sections</span>
+            </button>
           </div>
         )}
       </div>
@@ -197,29 +195,89 @@ export default function ChatsPage() {
         </div>
       </div>
 
-      <LiveChatConsole
-        currentAgent={currentAgent || { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' }}
-        selectedChatId={selectedChatId}
-        conversations={filteredConversations as unknown as ChatSession[]}
-        onSelectChat={(id) => {
-          setSelectedChatId(id || null);
-          const key = getSelectedKey(currentAgent?.email);
-          if (id) {
-            try {
-              localStorage.setItem(key, id);
-              localStorage.setItem('teals_selected_chat_id', id);
-            } catch {}
-            markConversationAsRead(id);
-          } else {
-            try {
-              localStorage.removeItem(key);
-              localStorage.removeItem('teals_selected_chat_id');
-            } catch {}
-          }
-        }}
-        onClaimSuccess={handleClaimSuccess}
-        onMarkRead={markConversationAsRead}
-      />
+      {!selectedWebsiteSlug ? (
+        <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 text-center">
+          <div className="max-w-xl mx-auto space-y-2">
+            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold">
+              <MessageSquare className="w-3.5 h-3.5" />
+              <span>Multi-Website Live Inboxes</span>
+            </div>
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Select a Website Section</h2>
+            <p className="text-xs sm:text-sm text-dark-muted">
+              Choose which website inbox you want to open. Incoming visitor chats are completely isolated per website.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto text-left pt-2">
+            {websites.map((site) => {
+              const IconComponent = getWebsiteIcon(site.slug);
+              const stats = getWebsiteStats(site.slug);
+
+              return (
+                <div
+                  key={site.slug}
+                  onClick={() => handleSelectWebsiteTab(site.slug)}
+                  className="group bg-[#0e1628] hover:bg-[#131f38] border border-dark-border hover:border-blue-500/60 rounded-2xl p-5 cursor-pointer transition-all duration-200 hover:shadow-xl hover:shadow-blue-500/10 flex flex-col justify-between space-y-4"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 group-hover:text-white group-hover:bg-blue-600 transition-all">
+                        <IconComponent className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">
+                          {site.name}
+                        </h3>
+                        <span className="text-[11px] text-dark-muted">{site.domain}</span>
+                      </div>
+                    </div>
+
+                    {stats.unread > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse shadow-md shadow-rose-500/40">
+                        {stats.unread} New
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-dark-border/60 flex items-center justify-between text-xs">
+                    <span className="text-dark-muted">
+                      Active Chats: <strong className="text-white font-bold">{stats.count}</strong>
+                    </span>
+                    <span className="text-blue-400 font-semibold flex items-center space-x-1 group-hover:translate-x-1 transition-transform">
+                      <span>Open Inbox</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <LiveChatConsole
+          currentAgent={currentAgent || { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' }}
+          selectedChatId={selectedChatId}
+          conversations={filteredConversations as unknown as ChatSession[]}
+          onSelectChat={(id) => {
+            setSelectedChatId(id || null);
+            const key = getSelectedKey(currentAgent?.email);
+            if (id) {
+              try {
+                localStorage.setItem(key, id);
+                localStorage.setItem('teals_selected_chat_id', id);
+              } catch {}
+              markConversationAsRead(id);
+            } else {
+              try {
+                localStorage.removeItem(key);
+                localStorage.removeItem('teals_selected_chat_id');
+              } catch {}
+            }
+          }}
+          onClaimSuccess={handleClaimSuccess}
+          onMarkRead={markConversationAsRead}
+        />
+      )}
     </div>
   );
 }
