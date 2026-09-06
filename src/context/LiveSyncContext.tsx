@@ -848,7 +848,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     // flush any pending beeps that accumulated while tab was in background
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        initAndUnlockAudio().then(() => flushPending()).catch(() => {});
+        initAndUnlockAudio().catch(() => {});
       }
     };
     document.addEventListener('visibilitychange', onVisible);
