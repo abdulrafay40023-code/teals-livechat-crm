@@ -1,7 +1,7 @@
 'use client';
 
 let ctx: AudioContext | null = null;
-let continuousHandoffInterval: NodeJS.Timeout | null = null;
+let continuousHandoffInterval: ReturnType<typeof setInterval> | null = null;
 let lastPlayedTone = '';
 let lastPlayedAt = 0;
 
