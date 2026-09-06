@@ -109,7 +109,8 @@ export function isStaffOrAdmin(email?: string | null, name?: string | null): boo
   if (cleanName) {
     if (STAFF_NAMES.includes(cleanName)) return true;
     if (typeof granularStore !== 'undefined') {
-      for (const a of granularStore.agents.values()) {
+      const allAgents = Array.from(granularStore.agents.values());
+      for (const a of allAgents) {
         if (a.full_name && a.full_name.toLowerCase().trim() === cleanName) return true;
       }
     }
