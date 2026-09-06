@@ -82,6 +82,7 @@ export const STAFF_EMAILS: string[] = [
   'tzafar04@gmail.com',
   'annusraees@gmail.com',
   'abdulrafay40023@gmail.com',
+  'hsalon680@gmail.com',
   'hsalon580@gmail.com'
 ];
 
@@ -268,10 +269,10 @@ class GranularStore {
       created_at: new Date().toISOString()
     };
     const agentHairSalon: StoreAgent = {
-      id: 'agent_hair_salon',
-      email: 'hsalon580@gmail.com',
+      id: 'agent_jc7c5kd',
+      email: 'hsalon680@gmail.com',
       full_name: 'Hair Salon',
-      phone: '03156789952',
+      phone: '03156289952',
       role: 'agent',
       status: 'approved',
       is_online: true,
@@ -283,6 +284,7 @@ class GranularStore {
     this.agents.set(adminAnnus.email.toLowerCase(), adminAnnus);
     this.agents.set(agent.email.toLowerCase(), agent);
     this.agents.set(agentHairSalon.email.toLowerCase(), agentHairSalon);
+    this.agents.delete('hsalon580@gmail.com');
   }
 
   async getSession(sessionId: string): Promise<StoreVisitorSession | null> {
@@ -698,8 +700,24 @@ class GranularStore {
         existing.status = 'approved';
       }
     }
+    this.agents.delete('hsalon580@gmail.com');
 
-    return Array.from(this.agents.values());
+    const seenEmails = new Set<string>();
+    const seenNames = new Set<string>();
+    const uniqueAgents: StoreAgent[] = [];
+
+    for (const a of Array.from(this.agents.values())) {
+      const cleanEmail = (a.email || '').toLowerCase().trim();
+      const cleanName = (a.full_name || '').toLowerCase().trim();
+      if (!cleanEmail || seenEmails.has(cleanEmail)) continue;
+      if (cleanName && seenNames.has(cleanName)) continue;
+
+      seenEmails.add(cleanEmail);
+      if (cleanName) seenNames.add(cleanName);
+      uniqueAgents.push(a);
+    }
+
+    return uniqueAgents;
   }
 
   async getAgent(agentId: string): Promise<StoreAgent | null> {

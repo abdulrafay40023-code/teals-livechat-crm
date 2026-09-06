@@ -29,6 +29,7 @@ const STAFF_EMAILS = [
   'tzafar04@gmail.com',
   'annusraees@gmail.com',
   'abdulrafay40023@gmail.com',
+  'hsalon680@gmail.com',
   'hsalon580@gmail.com'
 ];
 
