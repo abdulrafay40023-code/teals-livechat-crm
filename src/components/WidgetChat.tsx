@@ -24,12 +24,37 @@ interface SavedConvSummary {
   updatedAt: string;
 }
 
+const STAFF_EMAILS = [
+  'garryamelia6265@gmail.com',
+  'tzafar04@gmail.com',
+  'annusraees@gmail.com',
+  'abdulrafay40023@gmail.com'
+];
+
+const STAFF_NAMES = [
+  'garry amelia',
+  't zafar',
+  'annus raees',
+  'abdul rafay',
+  'abdulrafay'
+];
+
+function isStaffCredentials(email?: string, name?: string): boolean {
+  const cleanEmail = (email || '').trim().toLowerCase();
+  const cleanName = (name || '').trim().toLowerCase();
+  if (cleanEmail && STAFF_EMAILS.includes(cleanEmail)) return true;
+  if (cleanName && STAFF_NAMES.includes(cleanName)) return true;
+  return false;
+}
+
 const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING, defaultSenderName = 'AI Assistant') => {
   const map = new Map<string, any>();
   let seenGreet = false;
 
   const hasClaimOrJoined = incomingList.some(m => m && m.sender_type === 'system' && (
     m.content?.includes('has claimed and joined') ||
+    m.content?.includes('has joined the conversation') ||
+    m.content?.includes('transferred to Real Agent') ||
     m.content?.includes('transferred to Live Support Agent') ||
     m.content?.includes('taken over')
   ));
@@ -76,6 +101,8 @@ const dedupeMessages = (incomingList: any[], defaultGreeting = DEFAULT_GREETING,
   // Deduplicate multiple claim/transfer system messages: keep only the newest one
   const claimMsgs = Array.from(map.values()).filter(m => m.sender_type === 'system' && (
     m.content?.includes('has claimed and joined') ||
+    m.content?.includes('has joined the conversation') ||
+    m.content?.includes('transferred to Real Agent') ||
     m.content?.includes('transferred to Live Support Agent')
   ));
   if (claimMsgs.length > 1) {
@@ -137,6 +164,8 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
   const [viewingHistory, setViewingHistory] = useState(false);
   const [savedConversations, setSavedConversations] = useState<SavedConvSummary[]>([]);
   const [showChatLimitModal, setShowChatLimitModal] = useState(false);
+  const [showStaffBlockModal, setShowStaffBlockModal] = useState(false);
+  const [staffBlockError, setStaffBlockError] = useState('');
 
   const [userName, setUserName] = useState('');
   const [userEmail, setUserEmail] = useState('');
@@ -634,6 +663,13 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     const cleanEmail = (formData.get('email') as string || userEmail || '').trim();
     if (!cleanName || !cleanEmail) return;
 
+    // Strict Client vs Staff check: Agents & Admins cannot initiate chats as clients
+    if (isStaffCredentials(cleanEmail, cleanName)) {
+      setStaffBlockError('Agents & Admins cannot initiate chats as clients. Aapko as a client aana hoga.');
+      setShowStaffBlockModal(true);
+      return;
+    }
+
     setUserName(cleanName);
     setUserEmail(cleanEmail);
 
@@ -667,7 +703,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
     fetchVisitorConversations(targetConvId, cleanEmail);
 
     try {
-      await fetch('/api/visitor/track', {
+      const trackRes = await fetch('/api/visitor/track', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -680,6 +716,15 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           visitorEmail: cleanEmail
         })
       });
+      if (trackRes.status === 403) {
+        const errData = await trackRes.json();
+        if (errData.isStaffBlocked) {
+          setHasSubmittedLead(false);
+          setStaffBlockError(errData.error || 'Agents & Admins cannot initiate chats as clients. Aapko as a client aana hoga.');
+          setShowStaffBlockModal(true);
+          return;
+        }
+      }
     } catch {}
   };
 
@@ -1047,6 +1092,35 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
             </div>
           )}
 
+          {/* Staff / Admin Client Restriction Modal */}
+          {showStaffBlockModal && (
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-5 animate-in fade-in duration-200">
+              <div className="bg-[#11192e] border border-red-500/40 rounded-2xl p-5 max-w-[310px] w-full text-center space-y-3.5 shadow-2xl animate-in zoom-in-95 duration-150">
+                <div className="w-12 h-12 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mx-auto text-red-400">
+                  <AlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white tracking-tight">Access Restricted</h4>
+                  <p className="text-xs text-gray-300 mt-2 leading-relaxed">
+                    {staffBlockError || 'Agents & Admins cannot initiate chats as clients. Aapko as a client aana hoga.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowStaffBlockModal(false);
+                    setUserName('');
+                    setUserEmail('');
+                    setHasSubmittedLead(false);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-lg cursor-pointer"
+                >
+                  Theek Hai / Understood
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Header */}
           <div className="p-3 px-4 bg-gradient-to-r from-blue-900/40 via-[#11192e] to-[#11192e] border-b border-gray-800 flex items-center justify-between">
             <div className="flex items-center space-x-2.5">
@@ -1079,7 +1153,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                     : viewingHistory
                     ? 'Conversations'
                     : isHumanConnected
-                    ? (agentName || 'Support Agent')
+                    ? 'Real Agent'
                     : siteAiName}
                 </h3>
                 <div className="flex items-center space-x-1.5 text-[10px] text-emerald-400">
@@ -1304,7 +1378,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       <div className="flex items-center space-x-1.5 mb-1 px-1">
                         {!isVisitor && (
                           <span className="text-[10px] font-bold text-gray-400">
-                            {m.sender_name || 'Agent'}
+                            {m.sender_type === 'agent' ? 'Real Agent' : (m.sender_name || 'AI Assistant')}
                           </span>
                         )}
                       </div>
@@ -1322,7 +1396,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                   );
                 })}
 
-                {/* Agent Typing Indicator (Simple "Agent is typing..." with animated dots) */}
+                {/* Agent Typing Indicator (Simple "Real Agent is typing..." with animated dots) */}
                 {agentTypingText && (
                   <div className="flex items-center space-x-2 text-[11px] text-blue-400 bg-blue-950/50 border border-blue-900/40 rounded-xl px-3 py-2 animate-pulse">
                     <div className="flex space-x-1 items-center">
@@ -1330,7 +1404,7 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce delay-100" />
                       <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce delay-200" />
                     </div>
-                    <span className="font-medium text-blue-300">{agentName || 'Live Support Agent'} is typing...</span>
+                    <span className="font-medium text-blue-300">Real Agent is typing...</span>
                   </div>
                 )}
 

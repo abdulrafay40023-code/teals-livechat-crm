@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { granularStore, StoreVisitorSession, StoreMessage } from '@/lib/store';
+import { granularStore, StoreVisitorSession, StoreMessage, isStaffOrAdmin } from '@/lib/store';
 import { lookupGeoAsync } from '@/lib/geo';
 import { parseUserAgent } from '@/lib/device';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
@@ -29,6 +29,15 @@ export async function POST(req: NextRequest) {
       visitorName,
       visitorEmail
     } = body;
+
+    // Strict block: Agents and Admins cannot enter/chat as a client/visitor
+    if (isStaffOrAdmin(visitorEmail, visitorName)) {
+      return NextResponse.json({
+        success: false,
+        error: 'Agents and Admins cannot initiate chats as clients. Aapko as a client aana hoga.',
+        isStaffBlocked: true
+      }, { status: 403 });
+    }
 
     const refererHeader = req.headers.get('referer');
     const effectiveSlug = (propertySlug && propertySlug !== 'teals-crm')

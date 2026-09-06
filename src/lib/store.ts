@@ -77,10 +77,44 @@ export const ADMIN_EMAILS: string[] = [
   'annusraees@gmail.com'
 ];
 
+export const STAFF_EMAILS: string[] = [
+  'garryamelia6265@gmail.com',
+  'tzafar04@gmail.com',
+  'annusraees@gmail.com',
+  'abdulrafay40023@gmail.com'
+];
+
+export const STAFF_NAMES: string[] = [
+  'garry amelia',
+  't zafar',
+  'annus raees',
+  'abdul rafay',
+  'abdulrafay'
+];
+
 export function isUserAdmin(email?: string | null, role?: string | null): boolean {
   if (role === 'admin') return true;
   if (!email) return false;
   return ADMIN_EMAILS.includes(email.toLowerCase().trim());
+}
+
+export function isStaffOrAdmin(email?: string | null, name?: string | null): boolean {
+  const cleanEmail = (email || '').toLowerCase().trim();
+  const cleanName = (name || '').toLowerCase().trim();
+
+  if (cleanEmail) {
+    if (STAFF_EMAILS.includes(cleanEmail) || ADMIN_EMAILS.includes(cleanEmail)) return true;
+    if (typeof granularStore !== 'undefined' && granularStore.agents.has(cleanEmail)) return true;
+  }
+  if (cleanName) {
+    if (STAFF_NAMES.includes(cleanName)) return true;
+    if (typeof granularStore !== 'undefined') {
+      for (const a of granularStore.agents.values()) {
+        if (a.full_name && a.full_name.toLowerCase().trim() === cleanName) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function sanitizeKey(k: string): string {

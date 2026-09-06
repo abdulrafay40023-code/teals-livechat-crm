@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { granularStore, StoreMessage, StoreConversation } from '@/lib/store';
+import { granularStore, StoreMessage, StoreConversation, isStaffOrAdmin } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { isHumanHandoffRequested, generateAIChatResponse } from '@/lib/gemini';
 import { getWebsiteConfig, detectWebsiteSlugFromUrl } from '@/lib/websites-config';
@@ -60,6 +60,14 @@ export async function POST(req: NextRequest) {
 
     if (!content || !senderType) {
       return NextResponse.json({ error: 'Missing content or senderType' }, { status: 400 });
+    }
+
+    // Strict block: Agents and Admins cannot enter/chat as a client/visitor
+    if (senderType === 'visitor' && isStaffOrAdmin(senderEmail, senderName)) {
+      return NextResponse.json({
+        error: 'Agents and Admins cannot initiate chats as clients. Aapko as a client aana hoga.',
+        isStaffBlocked: true
+      }, { status: 403 });
     }
 
     const refererHeader = req.headers.get('referer');

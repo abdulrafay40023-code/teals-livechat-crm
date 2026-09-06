@@ -43,8 +43,8 @@ export async function POST(req: NextRequest) {
       sender_type: 'system',
       sender_name: 'System',
       content: isTransfer
-        ? `Chat transferred to Live Support Agent ${agentName}.`
-        : `Live Support Agent ${agentName} has claimed and joined the conversation.`,
+        ? `Chat transferred to Real Agent.`
+        : `Real Agent has joined the conversation.`,
       is_whisper: false,
       seq: maxSeq + 1,
       created_at: now
@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
       m.content.includes('has claimed and joined') ||
       m.content.includes('transferred to Live Support Agent') ||
       m.content.includes('Transferring to a live support agent') ||
+      m.content.includes('has joined the conversation') ||
+      m.content.includes('transferred to Real Agent') ||
       m.content.includes('taken over')
     )));
     conv.messages.push(sysMsg);
