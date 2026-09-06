@@ -121,6 +121,27 @@ export function isStaffOrAdmin(email?: string | null, name?: string | null): boo
   return false;
 }
 
+export async function isStaffOrAdminAsync(email?: string | null, name?: string | null): Promise<boolean> {
+  const cleanEmail = (email || '').toLowerCase().trim();
+  const cleanName = (name || '').toLowerCase().trim();
+
+  if (cleanEmail) {
+    if (STAFF_EMAILS.includes(cleanEmail) || ADMIN_EMAILS.includes(cleanEmail)) return true;
+  }
+  if (cleanName) {
+    if (STAFF_NAMES.includes(cleanName)) return true;
+  }
+
+  if (typeof granularStore !== 'undefined') {
+    const allAgents = await granularStore.getAllAgents();
+    for (const a of allAgents) {
+      if (cleanEmail && a.email && a.email.toLowerCase().trim() === cleanEmail) return true;
+      if (cleanName && a.full_name && a.full_name.toLowerCase().trim() === cleanName) return true;
+    }
+  }
+  return false;
+}
+
 function sanitizeKey(k: string): string {
   return (k || '').replace(/[^a-zA-Z0-9_-]/g, '_');
 }

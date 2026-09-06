@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     } = body;
 
     // Strict block: Agents and Admins cannot enter/chat as a client/visitor
-    if (isStaffOrAdmin(visitorEmail, visitorName)) {
+    if (await isStaffOrAdminAsync(visitorEmail, visitorName)) {
       return NextResponse.json({
         success: false,
         error: 'Agents and Admins cannot initiate chats as clients. Aapko as a client aana hoga.',
