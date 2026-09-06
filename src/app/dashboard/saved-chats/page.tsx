@@ -44,7 +44,7 @@ export default function AllChatsSavePage() {
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
 
   const websites = getAllWebsites();
-  const supabaseBucketUrl = 'https://supabase.com/dashboard/project/nyoegrnemmravwqdcqnp/storage/buckets/teals-livechat';
+  const supabaseBucketUrl = 'https://supabase.com/dashboard/project/nyoegrnemmravwqdcqnp/storage/buckets/teals-live-store';
 
   const fetchSavedChats = async () => {
     setLoading(true);

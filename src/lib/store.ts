@@ -337,13 +337,14 @@ class GranularStore {
     // 0ms instant in-memory update
     this.convCache.set(conv.id, mergedConv);
 
-    // Persist to Supabase Storage
+    // Persist to Supabase Storage (both buckets for redundancy)
     const key = `conversations/${sanitizeKey(conv.id)}.json`;
+    const payload = JSON.stringify(mergedConv);
     try {
-      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(mergedConv), {
-        upsert: true,
-        contentType: 'application/json'
-      });
+      await Promise.allSettled([
+        supabaseAdmin.storage.from('teals-live-store').upload(key, payload, { upsert: true, contentType: 'application/json' }),
+        supabaseAdmin.storage.from('teals-livechat').upload(key, payload, { upsert: true, contentType: 'application/json' })
+      ]);
     } catch (e) {
       console.error('Cloud save conversation error:', e);
     }
