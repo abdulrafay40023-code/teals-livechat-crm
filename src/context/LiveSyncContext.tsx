@@ -425,13 +425,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const session: LiveVisitor | undefined = ((raw as Record<string, unknown>)?.session as LiveVisitor) || (((raw as Record<string, unknown>)?.id) ? (raw as unknown as LiveVisitor) : undefined);
 
         if (session && session.id) {
-          const dedupeKey = session.ip_address || session.id; // IP for count dedup
-          // Dedup by IP so page changes or refreshes do not re-chime
+          const dedupeKey = session.visitor_token || session.id;
+          // Dedup alert chimes per distinct device
           triggerArrivalBeepIfNew(dedupeKey, 'WebSocket_visitor_arrival');
 
           setLiveVisitors((prev) => {
             const map = new Map<string, LiveVisitor>();
-            prev.forEach(v => map.set(v.ip_address || v.id, v));
+            prev.forEach(v => map.set(v.visitor_token || v.id, v));
             map.set(dedupeKey, session);
             const nextList = Array.from(map.values()).filter(v => v.is_online);
             setLiveCount(nextList.length);
@@ -450,7 +450,7 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const currentPage = (raw as Record<string, unknown>)?.currentPage as string;
         if (sessionId && currentPage) {
           setLiveVisitors((prev) =>
-            prev.map(v => v.id === sessionId ? { ...v, current_page: currentPage } : v)
+            prev.map(v => (v.id === sessionId || v.visitor_token === sessionId) ? { ...v, current_page: currentPage } : v)
           );
         }
       })
@@ -458,18 +458,14 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.log('[SYNC_DEBUG] WebSocket visitor_offline event received:', payload);
         const raw = (payload as Record<string, unknown>)?.payload || payload;
         const sessionId = (raw as Record<string, unknown>)?.sessionId as string;
-        const sessionIp = (raw as Record<string, unknown>)?.ip as string;
 
-        if (sessionId || sessionIp) {
-          // Grace period: allow 30 seconds before allowing re-arrival beep for same session/IP
-          // This prevents rapid navigation between website pages from repeatedly ringing arrival alerts
+        if (sessionId) {
           setTimeout(() => {
             if (sessionId) recentArrivalTimestamps.current.delete(sessionId);
-            if (sessionIp) recentArrivalTimestamps.current.delete(sessionIp);
           }, 30000);
 
           setLiveVisitors((prev) => {
-            const nextList = prev.filter(v => v.id !== sessionId && (!sessionIp || v.ip_address !== sessionIp));
+            const nextList = prev.filter(v => v.id !== sessionId && v.visitor_token !== sessionId);
             setLiveCount(nextList.length);
             return nextList;
           });

@@ -447,10 +447,10 @@ class GranularStore {
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
-    // Calculate total visit count per IP / token
+    // Calculate total visit count per unique device (visitor_token / session id)
     const visitCountMap = new Map<string, number>();
     allSessions.forEach(s => {
-      const key = s.ip_address || s.visitor_token || s.id;
+      const key = s.visitor_token || s.id;
       visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
     });
 
@@ -461,12 +461,12 @@ class GranularStore {
       return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
     });
 
-    // Deduplicate strictly by IP address: 1 IP = 1 Live Visitor (attaching visit_count & first created_at)
+    // Deduplicate by visitor_token / session ID: distinct devices on the same IP each appear as separate rows
     const liveVisitorsMap = new Map<string, StoreVisitorSession>();
     rawLiveSessions.forEach(s => {
-      const key = s.ip_address || s.id;
+      const key = s.visitor_token || s.id;
       const existing = liveVisitorsMap.get(key);
-      const visits = visitCountMap.get(key) || visitCountMap.get(s.visitor_token) || 1;
+      const visits = visitCountMap.get(key) || 1;
       const enrichedSession: StoreVisitorSession = {
         ...s,
         visit_count: visits
@@ -482,9 +482,9 @@ class GranularStore {
     const currentAllTimeSet = new Set<string>();
     
     filteredSessions.forEach(s => {
-      const ip = s.ip_address || s.id;
-      if (ip) {
-        currentAllTimeSet.add(ip);
+      const uniqueDeviceKey = s.visitor_token || s.ip_address || s.id;
+      if (uniqueDeviceKey) {
+        currentAllTimeSet.add(uniqueDeviceKey);
         try {
           const sDate = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'Asia/Karachi',
@@ -493,10 +493,10 @@ class GranularStore {
             day: '2-digit'
           }).format(new Date(s.created_at || s.last_active_at));
           if (sDate === today) {
-            currentTodaySet.add(ip);
+            currentTodaySet.add(uniqueDeviceKey);
           }
         } catch {
-          currentTodaySet.add(ip);
+          currentTodaySet.add(uniqueDeviceKey);
         }
       }
     });
@@ -546,16 +546,16 @@ class GranularStore {
       });
       const siteLiveMap = new Map<string, StoreVisitorSession>();
       siteLiveSessions.forEach(s => {
-        const key = s.ip_address || s.id;
+        const key = s.visitor_token || s.id;
         siteLiveMap.set(key, s);
       });
 
       const siteTodaySet = new Set<string>();
       const siteAllTimeSet = new Set<string>();
       siteSessions.forEach(s => {
-        const ip = s.ip_address || s.id;
-        if (ip) {
-          siteAllTimeSet.add(ip);
+        const uniqueDeviceKey = s.visitor_token || s.ip_address || s.id;
+        if (uniqueDeviceKey) {
+          siteAllTimeSet.add(uniqueDeviceKey);
           try {
             const sDate = new Intl.DateTimeFormat('en-CA', {
               timeZone: 'Asia/Karachi',
@@ -564,10 +564,10 @@ class GranularStore {
               day: '2-digit'
             }).format(new Date(s.created_at || s.last_active_at));
             if (sDate === today) {
-              siteTodaySet.add(ip);
+              siteTodaySet.add(uniqueDeviceKey);
             }
           } catch {
-            siteTodaySet.add(ip);
+            siteTodaySet.add(uniqueDeviceKey);
           }
         }
       });
