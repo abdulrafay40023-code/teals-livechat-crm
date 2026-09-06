@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { granularStore, StoreMessage, StoreConversation, isStaffOrAdmin } from '@/lib/store';
+import { granularStore, StoreMessage, StoreConversation, isStaffOrAdmin, isStaffOrAdminAsync } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { isHumanHandoffRequested, generateAIChatResponse } from '@/lib/gemini';
 import { getWebsiteConfig, detectWebsiteSlugFromUrl } from '@/lib/websites-config';

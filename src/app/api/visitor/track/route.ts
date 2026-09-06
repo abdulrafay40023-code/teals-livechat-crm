@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { granularStore, StoreVisitorSession, StoreMessage, isStaffOrAdmin } from '@/lib/store';
+import { granularStore, StoreVisitorSession, StoreMessage, isStaffOrAdmin, isStaffOrAdminAsync } from '@/lib/store';
 import { lookupGeoAsync } from '@/lib/geo';
 import { parseUserAgent } from '@/lib/device';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
