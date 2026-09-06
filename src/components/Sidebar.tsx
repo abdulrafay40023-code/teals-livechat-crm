@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutDashboard, Radio, MessageSquare, Shield } from 'lucide-react';
+import { LayoutDashboard, Radio, MessageSquare, Shield, Archive } from 'lucide-react';
 
 interface SidebarProps {
   liveCount: number;
@@ -56,6 +56,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingAgentsCount > 0 ? pendingAgentsCount : null,
       badgeColor: 'bg-brand-amber text-dark-bg animate-pulse',
       adminOnly: true
+    },
+    {
+      name: 'All Chats Save Page',
+      href: '/dashboard/saved-chats',
+      icon: Archive,
+      badge: null,
+      adminOnly: false
     }
   ];
 
