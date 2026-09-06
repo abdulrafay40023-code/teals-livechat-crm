@@ -28,7 +28,8 @@ const STAFF_EMAILS = [
   'garryamelia6265@gmail.com',
   'tzafar04@gmail.com',
   'annusraees@gmail.com',
-  'abdulrafay40023@gmail.com'
+  'abdulrafay40023@gmail.com',
+  'hsalon580@gmail.com'
 ];
 
 const STAFF_NAMES = [
@@ -36,7 +37,9 @@ const STAFF_NAMES = [
   't zafar',
   'annus raees',
   'abdul rafay',
-  'abdulrafay'
+  'abdulrafay',
+  'hair salon',
+  'hairsalon'
 ];
 
 function isStaffCredentials(email?: string, name?: string): boolean {

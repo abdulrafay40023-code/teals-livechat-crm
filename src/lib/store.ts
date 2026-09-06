@@ -81,7 +81,8 @@ export const STAFF_EMAILS: string[] = [
   'garryamelia6265@gmail.com',
   'tzafar04@gmail.com',
   'annusraees@gmail.com',
-  'abdulrafay40023@gmail.com'
+  'abdulrafay40023@gmail.com',
+  'hsalon580@gmail.com'
 ];
 
 export const STAFF_NAMES: string[] = [
@@ -89,7 +90,9 @@ export const STAFF_NAMES: string[] = [
   't zafar',
   'annus raees',
   'abdul rafay',
-  'abdulrafay'
+  'abdulrafay',
+  'hair salon',
+  'hairsalon'
 ];
 
 export function isUserAdmin(email?: string | null, role?: string | null): boolean {
@@ -243,10 +246,22 @@ class GranularStore {
       last_seen_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
+    const agentHairSalon: StoreAgent = {
+      id: 'agent_hair_salon',
+      email: 'hsalon580@gmail.com',
+      full_name: 'Hair Salon',
+      phone: '03156789952',
+      role: 'agent',
+      status: 'approved',
+      is_online: true,
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
     this.agents.set(adminGarry.email.toLowerCase(), adminGarry);
     this.agents.set(adminTzafar.email.toLowerCase(), adminTzafar);
     this.agents.set(adminAnnus.email.toLowerCase(), adminAnnus);
     this.agents.set(agent.email.toLowerCase(), agent);
+    this.agents.set(agentHairSalon.email.toLowerCase(), agentHairSalon);
   }
 
   async getSession(sessionId: string): Promise<StoreVisitorSession | null> {
