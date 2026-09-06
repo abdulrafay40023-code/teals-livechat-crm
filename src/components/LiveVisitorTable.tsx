@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { MapPin, Globe, MessageSquare, Smartphone, Laptop, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { MapPin, Globe, MessageSquare, Smartphone, Laptop, Clock, UserCheck } from 'lucide-react';
 import { getCountryFlagUrl } from '@/lib/flags';
 import { getWebsiteConfig } from '@/lib/websites-config';
 
@@ -20,6 +20,7 @@ export interface VisitorRecord {
   os: string;
   device: string;
   is_online: boolean;
+  visit_count?: number;
   last_active_at: string;
   created_at: string;
 }
@@ -29,6 +30,34 @@ interface LiveVisitorTableProps {
   selectedWebsiteName?: string;
   onInitiateChat: (visitor: VisitorRecord) => void;
 }
+
+// Live ticking stopwatch component (like Tawk.to: 00:03:47, 03:54:45)
+const VisitorDurationTimer: React.FC<{ createdAt: string }> = ({ createdAt }) => {
+  const [elapsed, setElapsed] = useState<number>(() => {
+    const start = new Date(createdAt || Date.now()).getTime();
+    return Math.max(0, Math.floor((Date.now() - start) / 1000));
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const start = new Date(createdAt || Date.now()).getTime();
+      setElapsed(Math.max(0, Math.floor((Date.now() - start) / 1000)));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [createdAt]);
+
+  const pad = (n: number) => (n < 10 ? '0' + n : String(n));
+  const hrs = Math.floor(elapsed / 3600);
+  const mins = Math.floor((elapsed % 3600) / 60);
+  const secs = elapsed % 60;
+
+  return (
+    <span className="font-mono text-[11px] font-bold text-brand-emerald bg-brand-emerald/10 border border-brand-emerald/25 px-2 py-0.5 rounded flex items-center space-x-1">
+      <Clock className="w-2.5 h-2.5" />
+      <span>{pad(hrs)}:{pad(mins)}:{pad(secs)}</span>
+    </span>
+  );
+};
 
 export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
   visitors,
@@ -62,33 +91,35 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
             {selectedWebsiteName} Live Visitors ({visitors.length} Active Now)
           </h3>
         </div>
-        <span className="text-[11px] text-dark-muted font-medium">Real-Time IP & Geolocation Analytics</span>
+        <span className="text-[11px] text-dark-muted font-medium">Real-Time IP, Duration & Geolocation Analytics</span>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="bg-dark-bg/60 text-dark-muted font-bold uppercase tracking-wider border-b border-dark-border text-[10px]">
             <tr>
-              <th className="py-3.5 px-5">Status</th>
-              <th className="py-3.5 px-5">Website</th>
-              <th className="py-3.5 px-5">Location & Map</th>
-              <th className="py-3.5 px-5">IP Address</th>
-              <th className="py-3.5 px-5">Active Page</th>
-              <th className="py-3.5 px-5">Referrer</th>
-              <th className="py-3.5 px-5">Device</th>
-              <th className="py-3.5 px-5 text-right">Action</th>
+              <th className="py-3.5 px-4">Status</th>
+              <th className="py-3.5 px-4">Website</th>
+              <th className="py-3.5 px-4">Location & Map</th>
+              <th className="py-3.5 px-4">IP Address</th>
+              <th className="py-3.5 px-4">Active Page</th>
+              <th className="py-3.5 px-4">Referrer</th>
+              <th className="py-3.5 px-4">Device</th>
+              <th className="py-3.5 px-4">Time on Site</th>
+              <th className="py-3.5 px-4 text-center">Visits</th>
+              <th className="py-3.5 px-4 text-right">Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-dark-border">
             {visitors.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-14 text-center text-dark-muted space-y-2">
+                <td colSpan={10} className="py-14 text-center text-dark-muted space-y-2">
                   <Globe className="w-9 h-9 mx-auto text-dark-border animate-pulse" />
                   <p className="font-semibold text-white text-sm">
                     No active visitors on {selectedWebsiteName} right now
                   </p>
                   <p className="text-[11px] text-dark-muted">
-                    Jab koi visitor is website par aayega, real-time IP aur location ke sath yahan appear hoga!
+                    Jab koi visitor website par aayega, continuous live tracking aur IP duration ke sath yahan appear hoga!
                   </p>
                 </td>
               </tr>
@@ -101,7 +132,7 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
                 return (
                   <tr key={v.id} className="hover:bg-dark-cardHover transition-colors">
                     {/* Status */}
-                    <td className="py-3.5 px-5">
+                    <td className="py-3.5 px-4">
                       <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/30">
                         <span className="w-1.5 h-1.5 rounded-full bg-brand-emerald animate-pulse" />
                         <span>Online</span>
@@ -109,14 +140,14 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
                     </td>
 
                     {/* Website Badge */}
-                    <td className="py-3.5 px-5">
+                    <td className="py-3.5 px-4">
                       <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold border ${siteBadge.badge}`}>
                         {siteBadge.label}
                       </span>
                     </td>
 
                     {/* Location & Map */}
-                    <td className="py-3.5 px-5">
+                    <td className="py-3.5 px-4">
                       <div className="flex items-center space-x-2.5">
                         <img
                           src={flagSrc}
@@ -145,24 +176,24 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
                     </td>
 
                     {/* IP Address */}
-                    <td className="py-3.5 px-5 font-mono text-white font-semibold">
+                    <td className="py-3.5 px-4 font-mono text-white font-semibold">
                       {v.ip_address}
                     </td>
 
                     {/* Active Page */}
-                    <td className="py-3.5 px-5">
-                      <span className="font-mono text-brand-secondary font-medium text-[11px] px-2 py-0.5 rounded bg-dark-bg border border-dark-border inline-block max-w-[200px] truncate" title={v.current_page}>
+                    <td className="py-3.5 px-4">
+                      <span className="font-mono text-brand-secondary font-medium text-[11px] px-2 py-0.5 rounded bg-dark-bg border border-dark-border inline-block max-w-[180px] truncate" title={v.current_page}>
                         {v.current_page}
                       </span>
                     </td>
 
                     {/* Referrer */}
-                    <td className="py-3.5 px-5 text-dark-muted max-w-[150px] truncate" title={v.referrer}>
+                    <td className="py-3.5 px-4 text-dark-muted max-w-[130px] truncate" title={v.referrer}>
                       {v.referrer || 'Direct'}
                     </td>
 
                     {/* Device & OS */}
-                    <td className="py-3.5 px-5">
+                    <td className="py-3.5 px-4">
                       <div className="flex items-center space-x-1.5 text-[11px] text-dark-muted">
                         {v.device === 'Mobile' ? (
                           <Smartphone className="w-3.5 h-3.5 text-brand-secondary flex-shrink-0" />
@@ -174,8 +205,20 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
                       </div>
                     </td>
 
+                    {/* Time on Site (Live stopwatch) */}
+                    <td className="py-3.5 px-4">
+                      <VisitorDurationTimer createdAt={v.created_at || v.last_active_at} />
+                    </td>
+
+                    {/* Visits count (Frequency) */}
+                    <td className="py-3.5 px-4 text-center">
+                      <span className="font-bold font-mono text-xs px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                        {v.visit_count || 1}
+                      </span>
+                    </td>
+
                     {/* Action */}
-                    <td className="py-3.5 px-5 text-right">
+                    <td className="py-3.5 px-4 text-right">
                       <button
                         onClick={() => onInitiateChat(v)}
                         className="px-3 py-1.5 rounded-xl bg-brand-primary hover:bg-brand-primaryHover text-white text-xs font-bold shadow-md transition-all inline-flex items-center space-x-1"

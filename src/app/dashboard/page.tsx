@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
   Users, MessageSquare, Eye, Radio, ArrowRight, RotateCcw,
@@ -23,6 +23,60 @@ export default function OverviewDashboard() {
   } = useLiveSync();
 
   const [resetting, setResetting] = useState(false);
+  const [currentAgent, setCurrentAgent] = useState<{
+    id: string;
+    email: string;
+    full_name: string;
+    role: string;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const rawSession = localStorage.getItem('teals_agent_session');
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        setCurrentAgent(parsed);
+      }
+    } catch {}
+  }, []);
+
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const isAdmin = !currentAgent || currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
+
+  // Working agents rule: Only visible when visitor requested a real human agent OR already claimed by this agent
+  const isConvVisibleToAgent = (c: any) => {
+    if (isAdmin) return true;
+
+    const isMine = !!(
+      (c.claimed_by && c.claimed_by === currentAgent?.id) ||
+      (c.assigned_agent_id && c.assigned_agent_id === currentAgent?.id) ||
+      (c.assigned_agent && currentAgent && (
+        c.assigned_agent.toLowerCase() === currentAgent.email.toLowerCase() ||
+        c.assigned_agent.toLowerCase() === currentAgent.full_name.toLowerCase()
+      ))
+    );
+    if (isMine) return true;
+
+    const hasHumanNeed = (
+      c.status === 'queued' ||
+      c.status === 'open' ||
+      c.claimed === true ||
+      c.needs_human === true ||
+      c.mode === 'human'
+    );
+    const notClaimedByOther = !c.claimed_by || c.claimed_by === currentAgent?.id;
+    return hasHumanNeed && notClaimedByOther;
+  };
+
+  const getTodayDayName = () => {
+    try {
+      return new Intl.DateTimeFormat('en-US', { weekday: 'long', timeZone: 'Asia/Karachi' }).format(new Date());
+    } catch {
+      return 'Today';
+    }
+  };
+
+  const dayName = getTodayDayName();
 
   const handleReset = async () => {
     setResetting(true);
@@ -107,14 +161,16 @@ export default function OverviewDashboard() {
 
     const chatsForSite = conversations.filter(c => {
       const p = (c.property_slug || '').toLowerCase();
-      return p === slug || (cfg && (p === cfg.domain || cfg.hostnames.some(h => p.includes(h))));
+      const matchesSite = p === slug || (cfg && (p === cfg.domain || cfg.hostnames.some(h => p.includes(h))));
+      if (!matchesSite) return false;
+      return isConvVisibleToAgent(c);
     });
 
     return {
       liveCount: Math.max(liveForSite.length, stored?.liveCount || 0),
       todayCount: stored?.todayCount ?? 0,
       totalUniqueCount: stored?.totalUniqueCount ?? 0,
-      chatCount: stored?.chatCount ?? chatsForSite.length,
+      chatCount: isAdmin ? (stored?.chatCount ?? chatsForSite.length) : chatsForSite.length,
     };
   };
 
@@ -131,7 +187,7 @@ export default function OverviewDashboard() {
             </span>
           </div>
           <p className="text-xs text-dark-muted mt-1">
-            Real-time multi-website live traffic, 24-hour visitors & chat analytics
+            Real-time multi-website live traffic, today&apos;s visitors & chat analytics
           </p>
         </div>
 
@@ -225,13 +281,13 @@ export default function OverviewDashboard() {
                   {/* Stat 2: Today's Visitors */}
                   <div className="bg-[#0b101d] border border-dark-border/80 rounded-xl p-3">
                     <div className="flex items-center justify-between text-[11px] text-dark-muted font-semibold">
-                      <span>Today's Visitors</span>
+                      <span>Today&apos;s Visitors</span>
                       <Users className="w-3.5 h-3.5 text-brand-secondary" />
                     </div>
                     <div className="text-xl font-black text-white mt-1">
                       {stats.todayCount}
                     </div>
-                    <p className="text-[10px] text-dark-muted font-medium mt-0.5">Resets 24h</p>
+                    <p className="text-[10px] text-brand-secondary font-medium mt-0.5">Today ({dayName})</p>
                   </div>
 
                   {/* Stat 3: Total Unique */}

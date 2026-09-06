@@ -85,8 +85,7 @@
   // Initial track on page load
   sendTracking(true);
 
-  // 3.5-Second Active Heartbeat Ping
-  setInterval(function () {
+  function sendPing() {
     if (isAdmin) return;
     try {
       var currentPath = window.location.pathname || '/';
@@ -101,9 +100,37 @@
         })
       }).catch(function () {});
     } catch (e) {}
-  }, 3500);
+  }
 
-  // Instant departure notification via navigator.sendBeacon on tab close
+  // 5-Second Active Heartbeat Ping
+  setInterval(sendPing, 5000);
+
+  // Immediate ping when visitor switches tabs or focuses the window
+  if (typeof document.addEventListener !== 'undefined') {
+    document.addEventListener('visibilitychange', function () {
+      sendPing();
+    });
+  }
+  window.addEventListener('focus', sendPing);
+  window.addEventListener('pageshow', function () {
+    sendTracking(false);
+  });
+
+  // Throttled user interaction ping (max once per 8 seconds)
+  var lastInteractionPing = 0;
+  function onUserActive() {
+    var now = Date.now();
+    if (now - lastInteractionPing > 8000) {
+      lastInteractionPing = now;
+      sendPing();
+    }
+  }
+  window.addEventListener('mousemove', onUserActive, { passive: true });
+  window.addEventListener('scroll', onUserActive, { passive: true });
+  window.addEventListener('touchstart', onUserActive, { passive: true });
+  window.addEventListener('keydown', onUserActive, { passive: true });
+
+  // Instant departure notification via navigator.sendBeacon on tab close ONLY
   function handleOffline() {
     if (isAdmin) return;
     try {

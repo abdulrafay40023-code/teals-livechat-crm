@@ -18,6 +18,7 @@ export interface StoreVisitorSession {
   os: string;
   device: string;
   is_online: boolean;
+  visit_count?: number;
   last_active_at: string;
   created_at: string;
 }
@@ -442,9 +443,16 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 25 * 1000;
+    const HEARTBEAT_TIMEOUT = 120 * 1000; // 120-second resilient window (persists across background tabs & idle sessions)
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
+
+    // Calculate total visit count per IP / token
+    const visitCountMap = new Map<string, number>();
+    allSessions.forEach(s => {
+      const key = s.ip_address || s.visitor_token || s.id;
+      visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
+    });
 
     const isGlobal = !propertySlug || propertySlug === 'all' || propertySlug === 'teals-crm';
     const filteredSessions = isGlobal ? allSessions : allSessions.filter(s => s.property_slug === propertySlug);
@@ -453,13 +461,18 @@ class GranularStore {
       return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
     });
 
-    // Deduplicate strictly by IP address: 1 IP = 1 Live Visitor
+    // Deduplicate strictly by IP address: 1 IP = 1 Live Visitor (attaching visit_count & first created_at)
     const liveVisitorsMap = new Map<string, StoreVisitorSession>();
     rawLiveSessions.forEach(s => {
       const key = s.ip_address || s.id;
       const existing = liveVisitorsMap.get(key);
+      const visits = visitCountMap.get(key) || visitCountMap.get(s.visitor_token) || 1;
+      const enrichedSession: StoreVisitorSession = {
+        ...s,
+        visit_count: visits
+      };
       if (!existing || new Date(s.last_active_at).getTime() > new Date(existing.last_active_at).getTime()) {
-        liveVisitorsMap.set(key, s);
+        liveVisitorsMap.set(key, enrichedSession);
       }
     });
     const liveVisitors = Array.from(liveVisitorsMap.values());
