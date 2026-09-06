@@ -51,11 +51,40 @@ export async function POST(req: NextRequest) {
     const sid = sessionId || ('tab_' + Math.random().toString(36).substring(2, 10));
     const token = visitorToken || sid;
 
-    let ip = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '182.188.238.155';
-    if (ip.includes(',')) ip = ip.split(',')[0].trim();
-    if (ip === '::1' || ip === '127.0.0.1') ip = '182.188.238.155';
+    // 1. Resolve real client IP with full CDN / Proxy header priority
+    let ip =
+      req.headers.get('cf-connecting-ip') ||
+      req.headers.get('x-real-ip') ||
+      req.headers.get('x-client-ip') ||
+      req.headers.get('x-forwarded-for') ||
+      req.headers.get('fastly-client-ip') ||
+      req.headers.get('true-client-ip') ||
+      '';
 
-    const geo = await lookupGeoAsync(ip);
+    if (ip.includes(',')) {
+      ip = ip.split(',')[0].trim();
+    }
+    ip = ip.trim();
+
+    if (!ip || ip === '::1' || ip === '127.0.0.1') {
+      ip = req.headers.get('x-forwarded-for') || '182.188.238.155';
+      if (ip.includes(',')) ip = ip.split(',')[0].trim();
+      if (ip === '::1' || ip === '127.0.0.1') ip = '182.188.238.155';
+    }
+
+    // 2. Extract edge geolocation hints provided directly by Vercel Edge / Cloudflare
+    const edgeCountryCode = req.headers.get('x-vercel-ip-country') || req.headers.get('cf-ipcountry') || undefined;
+    const rawEdgeCity = req.headers.get('x-vercel-ip-city');
+    const edgeCity = rawEdgeCity ? decodeURIComponent(rawEdgeCity) : undefined;
+    const edgeRegion = req.headers.get('x-vercel-ip-country-region') || undefined;
+
+    // 3. Multi-tier Geo IP lookup
+    const geo = await lookupGeoAsync(ip, {
+      countryCode: edgeCountryCode,
+      city: edgeCity,
+      region: edgeRegion
+    });
+
     const userAgent = req.headers.get('user-agent') || '';
     const dev = parseUserAgent(userAgent);
     const nowIso = new Date().toISOString();
