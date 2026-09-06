@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Archive, Calendar, Search, ExternalLink, MessageSquare, Bot, UserCheck,
   Globe, Clock, Download, RefreshCw, Layers, Shield, FileText, CheckCircle2,
-  Phone, Mail, ArrowRight, User
+  Phone, Mail, ArrowRight, User, History, Sparkles
 } from 'lucide-react';
 import { getAllWebsites, WEBSITES, getWebsiteConfig } from '@/lib/websites-config';
 
@@ -163,14 +163,76 @@ export default function AllChatsSavePage() {
     return map;
   }, [conversations]);
 
+  const isConversationChat1 = (conv: SavedConversation): boolean => {
+    const key = (conv.visitor_email || conv.visitor_name || conv.visitor_id || conv.id).toLowerCase();
+    const group = emailToConvs.get(key) || [];
+    if (group.length <= 1) return true;
+    const sorted = [...group].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+    return sorted[0].id === conv.id;
+  };
+
   const getChatNumberLabel = (conv: SavedConversation) => {
     const key = (conv.visitor_email || conv.visitor_name || conv.visitor_id || conv.id).toLowerCase();
     const group = emailToConvs.get(key) || [];
-    if (group.length <= 1) return 'Chat 1 (Initial)';
+    if (group.length <= 1) return 'Chat 1 (Old)';
     const sorted = [...group].sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
     const idx = sorted.findIndex(c => c.id === conv.id);
     return idx === 0 ? 'Chat 1 (Old)' : `Chat ${idx + 1} (New)`;
   };
+
+  // Split into Chat 1 (Old) and Chat 2 (New) lists
+  const chat1List = useMemo(() => {
+    return filteredConversations.filter(c => isConversationChat1(c));
+  }, [filteredConversations, emailToConvs]);
+
+  const chat2List = useMemo(() => {
+    return filteredConversations.filter(c => !isConversationChat1(c));
+  }, [filteredConversations, emailToConvs]);
+
+  // Helper to group list by date
+  const groupConversationsByDate = (list: SavedConversation[]) => {
+    const groups: Record<string, { label: string; dateKey: string; items: SavedConversation[] }> = {};
+
+    list.forEach(c => {
+      const dateObj = new Date(c.created_at || c.updated_at || Date.now());
+      let dateKey = '';
+      let dateLabel = '';
+
+      try {
+        dateKey = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Asia/Karachi',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit'
+        }).format(dateObj);
+
+        dateLabel = new Intl.DateTimeFormat('en-US', {
+          timeZone: 'Asia/Karachi',
+          weekday: 'long',
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric'
+        }).format(dateObj);
+      } catch {
+        dateKey = 'archive';
+        dateLabel = 'Historical Archive';
+      }
+
+      if (!groups[dateKey]) {
+        groups[dateKey] = {
+          label: dateLabel,
+          dateKey,
+          items: []
+        };
+      }
+      groups[dateKey].items.push(c);
+    });
+
+    return Object.values(groups).sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  };
+
+  const chat1Grouped = useMemo(() => groupConversationsByDate(chat1List), [chat1List]);
+  const chat2Grouped = useMemo(() => groupConversationsByDate(chat2List), [chat2List]);
 
   const selectedConversation = useMemo(() => {
     return conversations.find(c => c.id === selectedConvId) || filteredConversations[0] || null;
@@ -239,6 +301,85 @@ export default function AllChatsSavePage() {
     }
   };
 
+  const renderConversationCard = (conv: SavedConversation, isChat2Card = false) => {
+    const isSelected = selectedConvId === conv.id;
+    const siteBadge = getWebsiteBadge(conv.property_slug);
+    const chatLabel = getChatNumberLabel(conv);
+    const lastMsg = conv.messages && conv.messages.length > 0
+      ? conv.messages[conv.messages.length - 1]
+      : null;
+    const isHuman = conv.mode === 'human' || !!conv.assigned_agent_id;
+
+    return (
+      <div
+        key={conv.id}
+        onClick={() => setSelectedConvId(conv.id)}
+        className={`p-3 rounded-xl border transition-all cursor-pointer space-y-2 ${
+          isSelected
+            ? isChat2Card
+              ? 'bg-[#1a1738] border-purple-500 shadow-md shadow-purple-500/10 ring-1 ring-purple-500/40'
+              : 'bg-[#15223e] border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/40'
+            : 'bg-[#0b101d] border-dark-border/70 hover:border-dark-border hover:bg-dark-cardHover'
+        }`}
+      >
+        {/* Top Row: Visitor Name & Website Badge */}
+        <div className="flex items-start justify-between gap-1.5">
+          <div className="min-w-0">
+            <div className="flex items-center space-x-1.5">
+              <h4 className="text-xs font-bold text-white truncate">
+                {conv.visitor_name || 'Anonymous Visitor'}
+              </h4>
+              <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded border flex-shrink-0 ${
+                isChat2Card
+                  ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                  : 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+              }`}>
+                {chatLabel}
+              </span>
+            </div>
+            <p className="text-[10px] text-dark-muted truncate mt-0.5 font-mono">
+              {conv.visitor_ip || conv.visitor_email || 'No IP recorded'}
+            </p>
+          </div>
+
+          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 ${siteBadge.badge}`}>
+            {siteBadge.label}
+          </span>
+        </div>
+
+        {/* Middle: Last Message Snippet */}
+        {lastMsg && (
+          <p className="text-[11px] text-dark-muted line-clamp-1 italic">
+            &ldquo;{lastMsg.content}&rdquo;
+          </p>
+        )}
+
+        {/* Bottom: Mode, Messages Count & Time */}
+        <div className="flex items-center justify-between text-[10px] text-dark-muted pt-1 border-t border-dark-border/40">
+          <div className="flex items-center space-x-1">
+            {isHuman ? (
+              <span className="text-amber-400 font-semibold flex items-center space-x-1">
+                <UserCheck className="w-3 h-3" />
+                <span className="truncate max-w-[80px]">{conv.assigned_agent_name || 'Agent'}</span>
+              </span>
+            ) : (
+              <span className="text-purple-400 font-semibold flex items-center space-x-1">
+                <Bot className="w-3 h-3" />
+                <span>AI</span>
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            <span>{conv.messages?.length || 0} msgs</span>
+            <span>•</span>
+            <span className="text-white font-mono">{formatMessageTime(conv.updated_at || conv.created_at)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
       {/* Top Banner */}
@@ -257,7 +398,7 @@ export default function AllChatsSavePage() {
                 </span>
               </h1>
               <p className="text-xs text-dark-muted">
-                Permanent day-by-day record of all conversations across all 5 websites (AI & Human Chats)
+                Permanent day-by-day record with separate <strong>Chat 1 (Old)</strong> and <strong>Chat 2 (New)</strong> columns across all 5 websites
               </p>
             </div>
           </div>
@@ -332,143 +473,130 @@ export default function AllChatsSavePage() {
         </div>
       </div>
 
-      {/* Main 2-Column Layout */}
+      {/* Main Layout: 2 Columns for (Chat 1 Old & Chat 2 New) + Transcript Viewer */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[620px]">
-        {/* Left Column: Date-wise Saved Chats List (5 cols) */}
-        <div className="lg:col-span-5 bg-dark-card border border-dark-border rounded-2xl p-4 flex flex-col h-[650px] shadow-xl">
-          <div className="flex items-center justify-between pb-3 border-b border-dark-border text-xs">
-            <div className="flex items-center space-x-2">
-              <Calendar className="w-4 h-4 text-brand-secondary" />
-              <span className="font-bold text-white">Date-Wise Chats ({filteredConversations.length})</span>
+        
+        {/* Left Area: 2 Columns Side-by-Side (7 cols) */}
+        <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          
+          {/* COLUMN 1: Chat 1 (Old / Initial Inquiries) */}
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-4 flex flex-col h-[650px] shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-dark-border text-xs">
+              <div className="flex items-center space-x-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
+                <span className="font-bold text-white flex items-center space-x-1.5">
+                  <History className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Chat 1 (Old History)</span>
+                </span>
+              </div>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                {chat1List.length}
+              </span>
             </div>
-            <span className="text-[11px] text-dark-muted">Chat 1 & Chat 2 History</span>
-          </div>
 
-          {/* Chat List Scroll Area */}
-          <div className="flex-1 overflow-y-auto space-y-4 pt-3 pr-1">
-            {loading ? (
-              <div className="py-20 text-center text-dark-muted space-y-2">
-                <RefreshCw className="w-6 h-6 animate-spin mx-auto text-brand-secondary" />
-                <p className="text-xs">Loading saved conversations from cloud storage...</p>
-              </div>
-            ) : groupedByDate.length === 0 ? (
-              <div className="py-20 text-center text-dark-muted space-y-2">
-                <Archive className="w-8 h-8 mx-auto text-dark-border" />
-                <p className="font-semibold text-white text-xs">No saved chats found</p>
-                <p className="text-[11px]">As visitors chat on websites, all historical conversations are automatically preserved here.</p>
-              </div>
-            ) : (
-              groupedByDate.map(group => (
-                <div key={group.dateKey} className="space-y-2">
-                  {/* Date Header */}
-                  <div className="sticky top-0 bg-[#0e1628]/95 backdrop-blur py-1 px-2.5 rounded-lg border border-dark-border/60 flex items-center justify-between z-10">
-                    <span className="text-[11px] font-bold text-brand-secondary flex items-center space-x-1.5">
-                      <Calendar className="w-3 h-3" />
-                      <span>{group.label}</span>
-                    </span>
-                    <span className="text-[10px] text-dark-muted font-bold px-1.5 py-0.5 rounded bg-dark-bg">
-                      {group.items.length} {group.items.length === 1 ? 'Chat' : 'Chats'}
-                    </span>
-                  </div>
-
-                  {/* Conversation Cards in this date group */}
-                  <div className="space-y-2">
-                    {group.items.map(conv => {
-                      const isSelected = selectedConvId === conv.id;
-                      const siteBadge = getWebsiteBadge(conv.property_slug);
-                      const chatLabel = getChatNumberLabel(conv);
-                      const lastMsg = conv.messages && conv.messages.length > 0
-                        ? conv.messages[conv.messages.length - 1]
-                        : null;
-                      const isHuman = conv.mode === 'human' || !!conv.assigned_agent_id;
-
-                      return (
-                        <div
-                          key={conv.id}
-                          onClick={() => setSelectedConvId(conv.id)}
-                          className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
-                            isSelected
-                              ? 'bg-[#15223e] border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/40'
-                              : 'bg-[#0b101d] border-dark-border/70 hover:border-dark-border hover:bg-dark-cardHover'
-                          }`}
-                        >
-                          {/* Top Row: Visitor Name & Website Badge */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="flex items-center space-x-2">
-                                <h4 className="text-xs font-bold text-white truncate">
-                                  {conv.visitor_name || 'Anonymous Visitor'}
-                                </h4>
-                                <span className="text-[9px] font-extrabold px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 border border-blue-500/30 flex-shrink-0">
-                                  {chatLabel}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-dark-muted truncate mt-0.5">
-                                {conv.visitor_email || conv.visitor_ip || 'No email provided'}
-                              </p>
-                            </div>
-
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded border flex-shrink-0 ${siteBadge.badge}`}>
-                              {siteBadge.label}
-                            </span>
-                          </div>
-
-                          {/* Middle: Last Message Snippet */}
-                          {lastMsg && (
-                            <p className="text-[11px] text-dark-muted line-clamp-1 italic">
-                              &ldquo;{lastMsg.content}&rdquo;
-                            </p>
-                          )}
-
-                          {/* Bottom: Mode, Messages Count & Time */}
-                          <div className="flex items-center justify-between text-[10px] text-dark-muted pt-1 border-t border-dark-border/40">
-                            <div className="flex items-center space-x-1.5">
-                              {isHuman ? (
-                                <span className="text-amber-400 font-semibold flex items-center space-x-1">
-                                  <UserCheck className="w-3 h-3" />
-                                  <span>Agent: {conv.assigned_agent_name || 'Staff'}</span>
-                                </span>
-                              ) : (
-                                <span className="text-purple-400 font-semibold flex items-center space-x-1">
-                                  <Bot className="w-3 h-3" />
-                                  <span>AI Automated</span>
-                                </span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center space-x-2">
-                              <span>{conv.messages?.length || 0} msgs</span>
-                              <span className="text-white font-mono">{formatMessageTime(conv.updated_at || conv.created_at)}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+            {/* Chat 1 Scroll Area */}
+            <div className="flex-1 overflow-y-auto space-y-3 pt-3 pr-1">
+              {loading ? (
+                <div className="py-20 text-center text-dark-muted space-y-2">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-blue-400" />
+                  <p className="text-xs">Loading Chat 1 records...</p>
                 </div>
-              ))
-            )}
+              ) : chat1Grouped.length === 0 ? (
+                <div className="py-20 text-center text-dark-muted space-y-2">
+                  <Archive className="w-7 h-7 mx-auto text-dark-border" />
+                  <p className="font-semibold text-white text-xs">No Chat 1 found</p>
+                  <p className="text-[10px]">Initial visitor conversations will appear here.</p>
+                </div>
+              ) : (
+                chat1Grouped.map(group => (
+                  <div key={group.dateKey} className="space-y-2">
+                    <div className="sticky top-0 bg-[#0e1628]/95 backdrop-blur py-1 px-2 rounded-lg border border-dark-border/60 flex items-center justify-between z-10">
+                      <span className="text-[10px] font-bold text-blue-300 flex items-center space-x-1">
+                        <Calendar className="w-3 h-3" />
+                        <span>{group.label}</span>
+                      </span>
+                      <span className="text-[9px] text-dark-muted font-mono font-bold px-1.5 py-0.5 rounded bg-dark-bg">
+                        {group.items.length}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {group.items.map(conv => renderConversationCard(conv, false))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
+
+          {/* COLUMN 2: Chat 2 (New / Follow-up / Returning Inquiries) */}
+          <div className="bg-dark-card border border-dark-border rounded-2xl p-4 flex flex-col h-[650px] shadow-xl">
+            <div className="flex items-center justify-between pb-3 border-b border-dark-border text-xs">
+              <div className="flex items-center space-x-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse" />
+                <span className="font-bold text-white flex items-center space-x-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <span>Chat 2 (New / Follow-up)</span>
+                </span>
+              </div>
+              <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                {chat2List.length}
+              </span>
+            </div>
+
+            {/* Chat 2 Scroll Area */}
+            <div className="flex-1 overflow-y-auto space-y-3 pt-3 pr-1">
+              {loading ? (
+                <div className="py-20 text-center text-dark-muted space-y-2">
+                  <RefreshCw className="w-5 h-5 animate-spin mx-auto text-purple-400" />
+                  <p className="text-xs">Loading Chat 2 records...</p>
+                </div>
+              ) : chat2Grouped.length === 0 ? (
+                <div className="py-20 text-center text-dark-muted space-y-2">
+                  <Sparkles className="w-7 h-7 mx-auto text-dark-border" />
+                  <p className="font-semibold text-white text-xs">No Chat 2 found</p>
+                  <p className="text-[10px]">When returning visitors start a 2nd or follow-up chat, they appear here.</p>
+                </div>
+              ) : (
+                chat2Grouped.map(group => (
+                  <div key={group.dateKey} className="space-y-2">
+                    <div className="sticky top-0 bg-[#0e1628]/95 backdrop-blur py-1 px-2 rounded-lg border border-dark-border/60 flex items-center justify-between z-10">
+                      <span className="text-[10px] font-bold text-purple-300 flex items-center space-x-1">
+                        <Calendar className="w-3 h-3" />
+                        <span>{group.label}</span>
+                      </span>
+                      <span className="text-[9px] text-dark-muted font-mono font-bold px-1.5 py-0.5 rounded bg-dark-bg">
+                        {group.items.length}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {group.items.map(conv => renderConversationCard(conv, true))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
         </div>
 
-        {/* Right Column: Full Conversation Transcript Viewer (7 cols) */}
-        <div className="lg:col-span-7 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-xl overflow-hidden">
+        {/* Right Column: Full Conversation Transcript Viewer (5 cols) */}
+        <div className="lg:col-span-5 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-xl overflow-hidden">
           {selectedConversation ? (
             <>
               {/* Transcript Header */}
-              <div className="p-4 px-6 border-b border-dark-border bg-dark-surface/60 flex items-center justify-between gap-3">
+              <div className="p-4 px-5 border-b border-dark-border bg-dark-surface/60 flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="flex items-center space-x-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-brand-primary/15 border border-brand-primary/30 flex items-center justify-center text-brand-secondary flex-shrink-0">
-                      <User className="w-4 h-4" />
+                  <div className="flex items-center space-x-2">
+                    <div className="w-7 h-7 rounded-xl bg-brand-primary/15 border border-brand-primary/30 flex items-center justify-center text-brand-secondary flex-shrink-0">
+                      <User className="w-3.5 h-3.5" />
                     </div>
                     <div className="min-w-0">
-                      <h3 className="text-sm font-bold text-white truncate">
+                      <h3 className="text-xs font-bold text-white truncate">
                         {selectedConversation.visitor_name || 'Anonymous Visitor'}
                       </h3>
-                      <div className="flex items-center space-x-2 text-[11px] text-dark-muted truncate">
-                        <span>{selectedConversation.visitor_email || 'No email'}</span>
-                        <span>•</span>
+                      <div className="flex items-center space-x-1.5 text-[10px] text-dark-muted truncate font-mono">
                         <span>IP: {selectedConversation.visitor_ip || 'Hidden'}</span>
                       </div>
                     </div>
@@ -480,38 +608,38 @@ export default function AllChatsSavePage() {
                   <button
                     onClick={exportTranscript}
                     title="Export transcript as text file"
-                    className="px-3 py-1.5 rounded-xl bg-dark-bg hover:bg-dark-cardHover border border-dark-border text-xs font-semibold text-white transition-all flex items-center space-x-1.5"
+                    className="px-2.5 py-1.5 rounded-xl bg-dark-bg hover:bg-dark-cardHover border border-dark-border text-[11px] font-semibold text-white transition-all flex items-center space-x-1"
                   >
-                    <Download className="w-3.5 h-3.5 text-brand-secondary" />
-                    <span>Download TXT</span>
+                    <Download className="w-3 h-3 text-brand-secondary" />
+                    <span>TXT</span>
                   </button>
                 </div>
               </div>
 
               {/* Conversation Meta Bar */}
-              <div className="px-6 py-2.5 bg-[#0b101d] border-b border-dark-border/60 flex flex-wrap items-center justify-between gap-2 text-[11px] text-dark-muted">
-                <div className="flex items-center space-x-3">
+              <div className="px-5 py-2 bg-[#0b101d] border-b border-dark-border/60 flex flex-wrap items-center justify-between gap-2 text-[10px] text-dark-muted">
+                <div className="flex items-center space-x-2">
                   <span className="flex items-center space-x-1">
-                    <Globe className="w-3.5 h-3.5 text-brand-secondary" />
-                    <span className="font-semibold text-white">{getWebsiteConfig(selectedConversation.property_slug).name}</span>
+                    <Globe className="w-3 h-3 text-brand-secondary" />
+                    <span className="font-semibold text-white truncate max-w-[120px]">{getWebsiteConfig(selectedConversation.property_slug).name}</span>
                   </span>
                   <span>•</span>
-                  <span>{getChatNumberLabel(selectedConversation)}</span>
+                  <span className="font-bold text-blue-400">{getChatNumberLabel(selectedConversation)}</span>
                 </div>
 
-                <div className="flex items-center space-x-3 font-mono">
+                <div className="flex items-center space-x-2 font-mono">
                   <span className="flex items-center space-x-1">
-                    <Clock className="w-3 h-3 text-dark-muted" />
-                    <span>{new Date(selectedConversation.created_at).toLocaleDateString()} {formatMessageTime(selectedConversation.created_at)}</span>
+                    <Clock className="w-2.5 h-2.5 text-dark-muted" />
+                    <span>{formatMessageTime(selectedConversation.created_at)}</span>
                   </span>
                 </div>
               </div>
 
               {/* Messages Thread */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-dark-bg/40">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-dark-bg/40">
                 {(!selectedConversation.messages || selectedConversation.messages.length === 0) ? (
                   <div className="py-20 text-center text-dark-muted space-y-2">
-                    <MessageSquare className="w-8 h-8 mx-auto text-dark-border" />
+                    <MessageSquare className="w-7 h-7 mx-auto text-dark-border" />
                     <p className="text-xs">No message logs recorded in this session</p>
                   </div>
                 ) : (
@@ -523,8 +651,8 @@ export default function AllChatsSavePage() {
 
                     if (isSystem) {
                       return (
-                        <div key={m.id || index} className="flex justify-center my-2">
-                          <span className="px-3 py-1 rounded-full text-[10px] font-semibold bg-dark-card border border-dark-border text-dark-muted">
+                        <div key={m.id || index} className="flex justify-center my-1.5">
+                          <span className="px-2.5 py-0.5 rounded-full text-[9px] font-semibold bg-dark-card border border-dark-border text-dark-muted">
                             ⚙️ {m.content}
                           </span>
                         </div>
@@ -537,7 +665,7 @@ export default function AllChatsSavePage() {
                         className={`flex flex-col ${isVisitor ? 'items-start' : 'items-end'}`}
                       >
                         {/* Sender Label & Timestamp */}
-                        <div className="flex items-center space-x-2 text-[10px] text-dark-muted mb-1 px-1">
+                        <div className="flex items-center space-x-1.5 text-[9px] text-dark-muted mb-0.5 px-1">
                           <span className="font-bold text-white">
                             {isVisitor
                               ? (selectedConversation.visitor_name || 'Visitor')
@@ -551,7 +679,7 @@ export default function AllChatsSavePage() {
 
                         {/* Bubble */}
                         <div
-                          className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs shadow-md leading-relaxed ${
+                          className={`max-w-[90%] rounded-2xl px-3.5 py-2 text-xs shadow-md leading-relaxed ${
                             isVisitor
                               ? 'bg-[#15223e] border border-blue-500/30 text-white rounded-tl-sm'
                               : isAgent
@@ -568,16 +696,16 @@ export default function AllChatsSavePage() {
               </div>
 
               {/* Transcript Footer */}
-              <div className="p-3 px-6 border-t border-dark-border/80 bg-dark-card flex items-center justify-between text-[11px] text-dark-muted">
-                <span>Chat ID: <code className="text-white font-mono text-[10px]">{selectedConversation.id}</code></span>
-                <span>Total Messages: <strong className="text-white">{selectedConversation.messages?.length || 0}</strong></span>
+              <div className="p-2.5 px-5 border-t border-dark-border/80 bg-dark-card flex items-center justify-between text-[10px] text-dark-muted">
+                <span>Chat ID: <code className="text-white font-mono text-[9px]">{selectedConversation.id}</code></span>
+                <span>Messages: <strong className="text-white">{selectedConversation.messages?.length || 0}</strong></span>
               </div>
             </>
           ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-dark-muted space-y-3">
-              <FileText className="w-12 h-12 text-dark-border animate-pulse" />
-              <p className="text-sm font-semibold text-white">Select a conversation from the left column</p>
-              <p className="text-xs max-w-sm">Click on any saved chat entry on the left to read its complete transcript, timestamps, and visitor information.</p>
+            <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-dark-muted space-y-2">
+              <FileText className="w-10 h-10 text-dark-border animate-pulse" />
+              <p className="text-xs font-semibold text-white">Select a conversation from Chat 1 or Chat 2</p>
+              <p className="text-[11px] max-w-xs">Click on any conversation card from either column to view full messages and timestamps.</p>
             </div>
           )}
         </div>
