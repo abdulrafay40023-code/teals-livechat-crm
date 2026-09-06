@@ -130,18 +130,21 @@
   window.addEventListener('touchstart', onUserActive, { passive: true });
   window.addEventListener('keydown', onUserActive, { passive: true });
 
-  // Instant departure notification via navigator.sendBeacon on tab close ONLY
+  // Instant departure notification on tab close / mobile swipe
   function handleOffline() {
     if (isAdmin) return;
     try {
       var payload = JSON.stringify({
         sessionId: tabSessionId,
+        visitorToken: visitorToken,
         propertySlug: propertySlug
       });
+      var url = serverOrigin + '/api/visitor/offline?sessionId=' + encodeURIComponent(tabSessionId);
       if (navigator.sendBeacon) {
-        navigator.sendBeacon(serverOrigin + '/api/visitor/offline', payload);
+        var blob = new Blob([payload], { type: 'application/json' });
+        navigator.sendBeacon(url, blob);
       } else {
-        fetch(serverOrigin + '/api/visitor/offline', {
+        fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
@@ -153,6 +156,7 @@
 
   window.addEventListener('beforeunload', handleOffline);
   window.addEventListener('pagehide', handleOffline);
+  window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe
   if (!isAdmin) {

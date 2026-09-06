@@ -443,7 +443,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 120 * 1000; // 120-second resilient window (persists across background tabs & idle sessions)
+    const HEARTBEAT_TIMEOUT = 30 * 1000; // 30-second window: resilient during active browsing (5s pings) and rapidly cleans up on exit/kill
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 

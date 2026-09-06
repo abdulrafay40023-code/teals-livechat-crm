@@ -7,8 +7,9 @@ import {
   playVisitorAlertSound,
   playChatMessageAlertSound,
   playHandoffAlertSound,
+  startContinuousHandoffRinger,
+  stopContinuousHandoffRinger,
   initAndUnlockAudio,
-  flushPending,
 } from '@/lib/audio';
 
 const ADMIN_EMAILS = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
@@ -234,6 +235,30 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, [conversations]);
 
   const chatCount = userVisibleConversations.length;
+
+  // Continuous Repeating Ringer for Unclaimed Human Agent Requests
+  useEffect(() => {
+    if (!soundEnabled) {
+      stopContinuousHandoffRinger();
+      return;
+    }
+
+    const hasUnclaimedHandoff = conversations.some(c => {
+      const isClaimed = !!(c.assigned_agent_id || c.claimed_by || (c as any).claimed === true);
+      const isPendingHuman = c.status === 'pending_agent' || c.mode === 'human' || (c as any).needs_human === true;
+      return isPendingHuman && !isClaimed;
+    });
+
+    if (hasUnclaimedHandoff) {
+      startContinuousHandoffRinger();
+    } else {
+      stopContinuousHandoffRinger();
+    }
+
+    return () => {
+      stopContinuousHandoffRinger();
+    };
+  }, [conversations, soundEnabled]);
 
   const markConversationAsRead = useCallback((convId: string) => {
     if (!convId) return;
