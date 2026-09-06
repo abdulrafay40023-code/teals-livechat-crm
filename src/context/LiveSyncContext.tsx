@@ -64,6 +64,9 @@ export interface LiveConversation {
   assigned_agent_name?: string;
   assigned_agent_email?: string;
   assigned_at?: string;
+  claimed_by?: string;
+  claimed?: boolean;
+  needs_human?: boolean;
   mode: 'ai' | 'human';
   status: 'active' | 'pending_agent' | 'closed';
   typing_preview?: string;
@@ -244,8 +247,8 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const hasUnclaimedHandoff = conversations.some(c => {
-      const isClaimed = !!(c.assigned_agent_id || c.claimed_by || (c as any).claimed === true);
-      const isPendingHuman = c.status === 'pending_agent' || c.mode === 'human' || (c as any).needs_human === true;
+      const isClaimed = !!(c.assigned_agent_id || c.claimed_by || c.claimed === true);
+      const isPendingHuman = c.status === 'pending_agent' || c.mode === 'human' || c.needs_human === true;
       return isPendingHuman && !isClaimed;
     });
 
