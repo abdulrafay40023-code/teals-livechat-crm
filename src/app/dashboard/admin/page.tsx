@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, Check, X, Mail, Phone, Users, Code2, UserCheck, Activity, Laptop } from 'lucide-react';
+import { Shield, Check, X, Mail, Phone, Users, Code2, UserCheck, Activity, Laptop, Trash2 } from 'lucide-react';
 import { PendingAgent } from '@/components/ApprovalBanner';
 import { AgentAvatar } from '@/components/AgentAvatar';
 
@@ -72,6 +72,8 @@ export default function AdminPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const [removingAgentId, setRemovingAgentId] = useState<string | null>(null);
+
   const handleApprove = async (agentId: string) => {
     try {
       const res = await fetch('/api/agent/approvals', {
@@ -95,6 +97,29 @@ export default function AdminPage() {
       if (res.ok) fetchAgents();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleRemove = async (agentId: string, agentName: string) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to remove agent "${agentName}"? They will lose access immediately and will require Admin approval to rejoin.`
+    );
+    if (!confirmed) return;
+
+    setRemovingAgentId(agentId);
+    try {
+      const res = await fetch('/api/agent/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, action: 'remove' })
+      });
+      if (res.ok) {
+        fetchAgents();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setRemovingAgentId(null);
     }
   };
 
@@ -168,9 +193,23 @@ export default function AdminPage() {
                     </div>
                   )}
 
-                  <div className="pt-1 flex items-center space-x-1.5 text-[10px] text-brand-emerald">
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand-emerald animate-pulse" />
-                    <span>Logged In & Active</span>
+                  <div className="pt-2 flex items-center justify-between border-t border-dark-border/60 mt-1">
+                    <div className="flex items-center space-x-1.5 text-[10px] text-brand-emerald">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-emerald animate-pulse" />
+                      <span>{isAdminAgent ? 'Master Admin' : 'Logged In & Active'}</span>
+                    </div>
+
+                    {!isAdminAgent && (
+                      <button
+                        onClick={() => handleRemove(agent.id, agent.full_name)}
+                        disabled={removingAgentId === agent.id}
+                        title={`Remove ${agent.full_name} from team`}
+                        className="px-2 py-0.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/20 text-[10px] font-semibold flex items-center space-x-1 transition-all disabled:opacity-50"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{removingAgentId === agent.id ? 'Removing...' : 'Remove'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

@@ -66,21 +66,54 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     }
     try {
       const agent = JSON.parse(rawSession);
-      if (agent.status !== 'approved' && agent.role !== 'admin') {
+      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+      const isAdm = agent.role === 'admin' || (agent.email && adminEmails.includes(agent.email.toLowerCase()));
+
+      if (agent.status !== 'approved' && !isAdm) {
+        localStorage.removeItem('teals_agent_session');
         router.push('/login');
         return;
       }
       setCurrentAgent(agent);
 
-      fetch('/api/agent/ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: agent.email,
-          status: 'online'
-        })
-      }).catch(() => {});
+      const verifyAndPing = () => {
+        fetch('/api/agent/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: agent.email,
+            status: 'online'
+          })
+        }).then(res => {
+          if (res.status === 403) {
+            localStorage.removeItem('teals_agent_session');
+            router.push('/login');
+          }
+        }).catch(() => {});
+      };
+
+      verifyAndPing();
+      const pingTimer = setInterval(verifyAndPing, 10000);
+
+      // Realtime listener: if admin removes this agent, immediately evict
+      const channel = supabase.channel('teals-agent-auth-monitor', {
+        config: { broadcast: { self: true } }
+      });
+      channel.on('broadcast', { event: 'agent_removed' }, (payload: { payload?: { agentEmail?: string }; agentEmail?: string }) => {
+        const raw = payload?.payload || payload;
+        const removedEmail = raw?.agentEmail;
+        if (removedEmail && agent.email && removedEmail.toLowerCase() === agent.email.toLowerCase()) {
+          localStorage.removeItem('teals_agent_session');
+          router.push('/login');
+        }
+      }).subscribe();
+
+      return () => {
+        clearInterval(pingTimer);
+        supabase.removeChannel(channel);
+      };
     } catch {
+      localStorage.removeItem('teals_agent_session');
       router.push('/login');
     }
   }, [router]);

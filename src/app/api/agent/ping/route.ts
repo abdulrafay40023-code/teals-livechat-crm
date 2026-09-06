@@ -27,12 +27,26 @@ export async function POST(req: NextRequest) {
 
     let agent = granularStore.agents.get(cleanEmail);
     if (!agent) {
+      agent = (await granularStore.getAgent(cleanEmail)) || undefined;
+    }
+
+    if (!isAdmin) {
+      if (!agent || agent.status !== 'approved') {
+        return NextResponse.json({
+          success: false,
+          error: 'Agent access revoked or approval required',
+          status: agent?.status || 'pending'
+        }, { status: 403 });
+      }
+    }
+
+    if (!agent) {
       agent = {
         id: defaultId,
         email: cleanEmail,
         full_name: fullName || defaultName,
         phone: phone || '+1 (555) 019-2834',
-        role: isAdmin ? 'admin' : 'agent',
+        role: 'admin',
         status: 'approved',
         is_online: true,
         last_seen_at: nowIso,
@@ -41,7 +55,10 @@ export async function POST(req: NextRequest) {
     } else {
       agent.is_online = true;
       agent.last_seen_at = nowIso;
-      if (isAdmin) agent.role = 'admin';
+      if (isAdmin) {
+        agent.role = 'admin';
+        agent.status = 'approved';
+      }
       if (fullName) agent.full_name = fullName;
     }
 

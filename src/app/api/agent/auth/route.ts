@@ -14,8 +14,11 @@ export async function POST(req: NextRequest) {
     const cleanEmail = email.toLowerCase().trim();
     const isAdmin = ADMIN_EMAILS.includes(cleanEmail) || cleanEmail === (process.env.ADMIN_EMAIL || '').toLowerCase();
 
-    // Check Memory Store
+    // Check Memory Store & Supabase Storage
     let agent = memoryStore.agents.get(cleanEmail);
+    if (!agent) {
+      agent = (await granularStore.getAgent(cleanEmail)) || undefined;
+    }
 
     if (action === 'complete_profile') {
       if (!fullName || !phone) {
@@ -112,14 +115,44 @@ export async function POST(req: NextRequest) {
     if (isAdmin) {
       agent.role = 'admin';
       agent.status = 'approved';
+      agent.is_online = true;
+      agent.last_seen_at = new Date().toISOString();
+      await granularStore.saveAgent(agent);
+      return NextResponse.json({
+        agent,
+        status: 'approved',
+        isAdmin: true
+      });
     }
+
+    // If agent was removed/rejected or is pending, they cannot enter without Admin approval!
+    if (agent.status === 'rejected' || agent.status === 'pending') {
+      agent.status = 'pending';
+      agent.is_online = false;
+      agent.last_seen_at = new Date().toISOString();
+      await granularStore.saveAgent(agent);
+
+      broadcastRealtimeEvent('agent_pending_approval', {
+        agentName: agent.full_name,
+        agentEmail: agent.email,
+        agentPhone: agent.phone
+      }).catch(() => {});
+
+      return NextResponse.json({
+        agent,
+        status: 'pending',
+        isAdmin: false
+      });
+    }
+
     agent.is_online = true;
     agent.last_seen_at = new Date().toISOString();
+    await granularStore.saveAgent(agent);
 
     return NextResponse.json({
       agent,
       status: agent.status,
-      isAdmin: agent.role === 'admin'
+      isAdmin: false
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error';
