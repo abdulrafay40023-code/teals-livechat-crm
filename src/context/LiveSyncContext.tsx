@@ -524,8 +524,9 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           (conversation.assigned_agent_name && conversation.assigned_agent_name.toLowerCase().trim() === currentFullName) ||
           (conversation.assigned_agent_email && conversation.assigned_agent_email.toLowerCase().trim() === currentEmail)
         ));
-        const isHandoffEvent = isHandoffRequested || conversation?.status === 'pending_agent' || conversation?.mode === 'human';
-        const isVisitorMsg = message && message.sender_type === 'visitor';
+        const isVisitorMsg = !!(message && message.sender_type === 'visitor');
+        const isAgentMsg = !!(message && (message.sender_type === 'agent' || (message.sender_type as string) === 'admin' || message.sender_type === 'system'));
+        const isHandoffEvent = isVisitorMsg && (isHandoffRequested || conversation?.status === 'pending_agent' || conversation?.needs_human === true);
 
         // When a new visitor message arrives, immediately invalidate read map for this conversation
         if (isVisitorMsg && conversation?.id) {
@@ -622,13 +623,13 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           });
         }
 
-        // Beep logic (instant audio chimes)
-        if (soundEnabledRef.current) {
+        // Beep logic (instant audio chimes): ONLY play when VISITOR sends a message!
+        if (soundEnabledRef.current && isVisitorMsg && !isAgentMsg) {
           if (isHandoffEvent) {
-            // Customer requested real human agent: 2-second urgent alert chime (both admin and working agents hear this!)
+            // Customer requested real human agent: urgent alert chime
             playHandoffAlertSound();
-          } else if (isVisitorMsg) {
-            // Working agents only hear visitor message chime if it is their claimed chat!
+          } else {
+            // Normal visitor message: Working agents only hear visitor message chime if it is their claimed chat (admins hear all)
             if (isAdmin || isMyClaimedChat) {
               playChatMessageAlertSound();
             }
