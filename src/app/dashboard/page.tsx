@@ -155,59 +155,8 @@ export default function OverviewDashboard() {
         </div>
       </div>
 
-      {/* Global Aggregate KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        {/* Card 1: All Live Traffic */}
-        <div className="bg-dark-card/90 border border-dark-border rounded-2xl p-4 hover:border-brand-emerald/40 transition-all">
-          <div className="flex items-center justify-between text-xs text-dark-muted font-semibold">
-            <span>Total Live Traffic</span>
-            <span className="w-2.5 h-2.5 rounded-full bg-brand-emerald animate-ping" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-white mt-1.5 flex items-baseline space-x-2">
-            <span>{liveCount}</span>
-          </div>
-          <p className="text-[11px] text-brand-emerald font-semibold mt-1">Active across all sites</p>
-        </div>
-
-        {/* Card 2: Today's Total Visitors */}
-        <div className="bg-dark-card/90 border border-dark-border rounded-2xl p-4 hover:border-brand-primary/40 transition-all">
-          <div className="flex items-center justify-between text-xs text-dark-muted font-semibold">
-            <span>Today's Total Visitors</span>
-            <Users className="w-4 h-4 text-brand-secondary" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-white mt-1.5">
-            {todayCount}
-          </div>
-          <p className="text-[11px] text-dark-muted mt-1">Resets every 24 hours</p>
-        </div>
-
-        {/* Card 3: Active Conversations */}
-        <div className="bg-dark-card/90 border border-dark-border rounded-2xl p-4 hover:border-brand-primary/40 transition-all">
-          <div className="flex items-center justify-between text-xs text-dark-muted font-semibold">
-            <span>Active Conversations</span>
-            <MessageSquare className="w-4 h-4 text-brand-primary" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-white mt-1.5">
-            {chatCount}
-          </div>
-          <p className="text-[11px] text-dark-muted mt-1">AI & Human Handled</p>
-        </div>
-
-        {/* Card 4: Total Unique Visitors */}
-        <div className="bg-dark-card/90 border border-dark-border rounded-2xl p-4 hover:border-brand-secondary/40 transition-all">
-          <div className="flex items-center justify-between text-xs text-dark-muted font-semibold">
-            <span>Total Unique Visitors</span>
-            <Eye className="w-4 h-4 text-brand-secondary" />
-          </div>
-          <div className="text-2xl sm:text-3xl font-black text-white mt-1.5">
-            {totalUniqueCount}
-          </div>
-          <p className="text-[11px] text-brand-emerald font-semibold mt-1">Unique IP Analytics</p>
-        </div>
-      </div>
-
       {/* 5 Distinct Dedicated Website Analytics Cards */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Activity className="w-4 h-4 text-brand-secondary" />
