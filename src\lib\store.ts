@@ -321,14 +321,10 @@ class GranularStore {
     this.sessionCache.set(session.id, session);
     
     const key = `sessions/${sanitizeKey(session.id)}.json`;
-    try {
-      await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
-        upsert: true,
-        contentType: 'application/json'
-      });
-    } catch (e) {
-      console.error('Cloud save session error:', e);
-    }
+    supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
+      upsert: true,
+      contentType: 'application/json'
+    }).catch(e => console.error('Cloud save session error:', e));
 
     return session;
   }
@@ -344,12 +340,10 @@ class GranularStore {
       session.last_active_at = new Date().toISOString();
       this.sessionCache.set(session.id, session);
       const key = `sessions/${sanitizeKey(session.id)}.json`;
-      try {
-        await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
-          upsert: true,
-          contentType: 'application/json'
-        });
-      } catch {}
+      supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
+        upsert: true,
+        contentType: 'application/json'
+      }).catch(() => {});
       return session;
     }
     return null;
@@ -556,7 +550,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 25 * 60 * 1000; // 25 minutes: ensures background tabs (desktop/mobile) stay solidly online without flickering
+    const HEARTBEAT_TIMEOUT = 70 * 1000; // 70 seconds: comfortably covers 60s browser background pings while quickly auto-cleaning closed sessions
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 

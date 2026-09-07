@@ -127,8 +127,16 @@ export async function POST(req: NextRequest) {
       granularStore.incrementPageView();
     }
 
-    // Save session in memory/cloud
+    // Save session in memory (cloud upload is backgrounded)
     await granularStore.saveSession(session);
+
+    // Broadcast instant arrival IMMEDIATELY (0ms delay!)
+    broadcastRealtimeEvent('visitor_arrival', {
+      session,
+      propertySlug: effectiveSlug,
+      isNew: true,
+      currentPage
+    }).catch(() => {});
 
     let conv = await granularStore.getConversation(token);
     if (conv) {
@@ -139,21 +147,8 @@ export async function POST(req: NextRequest) {
       }
       conv.visitor_ip = ip;
       conv.updated_at = nowIso;
-      await granularStore.saveConversation(conv);
+      granularStore.saveConversation(conv).catch(() => {});
     }
-
-    // Fetch authoritative unique analytics
-    const activeData = await granularStore.getAllActiveData(effectiveSlug);
-
-    // Broadcast instant arrival with authoritative counts
-    await broadcastRealtimeEvent('visitor_arrival', {
-      session,
-      propertySlug: effectiveSlug,
-      todayCount: activeData.todayVisitorsCount,
-      totalUniqueCount: activeData.totalUniqueCount,
-      isNew: true,
-      currentPage
-    });
 
     return new NextResponse(JSON.stringify({
       success: true,

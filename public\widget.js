@@ -183,6 +183,7 @@
   if (typeof document.addEventListener !== 'undefined') {
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'visible') {
+        offlineSent = false;
         sendPing();
         sendTracking(false);
       }
@@ -234,9 +235,10 @@
   }, { capture: true, passive: true });
 
   // Instant departure notification on actual tab close / window unload
+  var offlineSent = false;
   function handleOffline(e) {
-    if (isAdmin || isNavigatingInternally) return;
-    if (e && e.persisted) return; // Ignore BFCache page suspension so background tabs stay online
+    if (isAdmin || isNavigatingInternally || offlineSent) return;
+    offlineSent = true;
     try {
       var payload = JSON.stringify({
         sessionId: tabSessionId,
@@ -245,12 +247,13 @@
       });
       var url = serverOrigin + '/api/visitor/offline?sessionId=' + encodeURIComponent(tabSessionId);
       if (navigator.sendBeacon) {
-        var blob = new Blob([payload], { type: 'application/json' });
+        // Plain text avoids CORS preflight so beacon transmits reliably on mobile and desktop unload
+        var blob = new Blob([payload], { type: 'text/plain' });
         navigator.sendBeacon(url, blob);
       } else {
         fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/plain' },
           body: payload,
           keepalive: true
         }).catch(function () {});
@@ -258,8 +261,9 @@
     } catch (e) {}
   }
 
-  // Trigger offline when tab or window is actually closed
+  // Trigger offline when tab or window is closed on desktop or mobile
   window.addEventListener('beforeunload', handleOffline);
+  window.addEventListener('pagehide', handleOffline);
   window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe

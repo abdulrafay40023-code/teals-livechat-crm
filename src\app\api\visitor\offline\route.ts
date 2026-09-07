@@ -13,6 +13,10 @@ export async function OPTIONS() {
   });
 }
 
+export async function GET(req: NextRequest) {
+  return POST(req);
+}
+
 export async function POST(req: NextRequest) {
   try {
     let sessionId: string | null = req.nextUrl.searchParams.get('sessionId');
