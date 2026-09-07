@@ -550,20 +550,19 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    // Adaptive Activity Checker:
-    // 1. Established visitors / background tabs (duration > 60s, like Tulsa desktop Chrome in background):
-    //    Modern browsers throttle inactive background tabs to wake up every 5-10 minutes.
-    //    We grant a 15-minute window so active background tabs NEVER flicker or disappear!
-    // 2. Fresh arrivals / test visits (duration <= 60s):
-    //    We keep a tight 45-second window so quick test sessions or bounces drop promptly if tab closed without beacon.
+    // Strict Session Activity Checker:
+    // 1. Established long-running desktop sessions with >10 minutes of active ping history (e.g. Tulsa background tab):
+    //    Allow up to 12 minutes between throttled wakeups so background tabs NEVER flicker or disappear.
+    // 2. Normal visits, fresh arrivals, and test visits (<10 min ping history, e.g. mobile tests):
+    //    STRICT 30-SECOND TIMEOUT! When closed, they drop within 30 seconds (or immediately via offline beacon).
     const isSessionActive = (s: StoreVisitorSession): boolean => {
       if (!s.is_online) return false;
       const lastActive = new Date(s.last_active_at).getTime();
       if (isNaN(lastActive)) return false;
 
       const createdAt = new Date(s.created_at || s.last_active_at).getTime();
-      const totalSessionDuration = !isNaN(createdAt) ? (now - createdAt) : 0;
-      const timeout = totalSessionDuration > 60 * 1000 ? 15 * 60 * 1000 : 45 * 1000;
+      const pingHistorySpan = !isNaN(createdAt) ? (lastActive - createdAt) : 0;
+      const timeout = pingHistorySpan > 10 * 60 * 1000 ? 12 * 60 * 1000 : 30 * 1000;
       return (now - lastActive) < timeout;
     };
 
