@@ -91,11 +91,11 @@ export async function lookupGeoAsync(
 ): Promise<{ country: string; countryCode: string; city: string; flag: string }> {
   const cleanIp = (ip || '').trim();
 
-  // 1. If edge headers already provided reliable country + city from Vercel / Cloudflare
-  if (hints?.countryCode && hints.countryCode.length === 2 && hints.countryCode.toUpperCase() !== 'XX') {
+  // 1. If edge headers already provided reliable country AND city from Vercel / Cloudflare
+  if (hints?.countryCode && hints.countryCode.length === 2 && hints.countryCode.toUpperCase() !== 'XX' && hints.city && hints.city.trim() !== '') {
     const code = hints.countryCode.toUpperCase();
     const country = getCountryName(code);
-    const city = (hints.city && hints.city.trim() !== '') ? hints.city.trim() : (hints.region || country);
+    const city = hints.city.trim();
     const result = {
       country,
       countryCode: code,
@@ -178,7 +178,14 @@ export async function lookupGeoAsync(
     console.error('[GEO] Provider 3 (freeipapi) failed:', e);
   }
 
-  // 7. Fallback
+  // 7. Fallback to Edge Hints if providers failed or timed out
+  if (hints?.countryCode && hints.countryCode.length === 2 && hints.countryCode.toUpperCase() !== 'XX') {
+    const code = hints.countryCode.toUpperCase();
+    const country = getCountryName(code);
+    const city = (hints.city && hints.city.trim() !== '') ? hints.city.trim() : (hints.region || country);
+    return { country, countryCode: code, city, flag: getCountryFlagUrl(code) };
+  }
+
   const fallback = { country: 'Unknown', countryCode: 'UN', city: 'Unknown', flag: getCountryFlagUrl('UN') };
   return fallback;
 }

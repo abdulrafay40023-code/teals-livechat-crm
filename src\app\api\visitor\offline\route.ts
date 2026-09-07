@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     if (sessionId) {
       const session = await granularStore.getSession(sessionId);
       const sessionIp = session?.ip_address;
-      await granularStore.removeSession(sessionId);
+      await granularStore.markSessionOffline(sessionId);
       await broadcastRealtimeEvent('visitor_offline', {
         sessionId,
         visitorToken: session?.visitor_token,

@@ -48,6 +48,19 @@
     } catch (e) {}
   }
 
+  // TAB START TIME: Locked once per tab in sessionStorage so duration never resets on refresh/nav
+  var tabStartTime;
+  try {
+    tabStartTime = sessionStorage.getItem('teals_tab_start_time');
+  } catch (e) {}
+
+  if (!tabStartTime) {
+    tabStartTime = new Date().toISOString();
+    try {
+      sessionStorage.setItem('teals_tab_start_time', tabStartTime);
+    } catch (e) {}
+  }
+
   // Persistent visitor token across reloads
   var visitorToken;
   try {
@@ -76,7 +89,8 @@
           propertySlug: propertySlug,
           currentPage: currentUrl,
           referrer: referrer,
-          isNewPageView: isNew
+          isNewPageView: isNew,
+          sessionStartTime: tabStartTime
         })
       }).catch(function () {});
     } catch (e) {}
@@ -96,8 +110,15 @@
           sessionId: tabSessionId,
           visitorToken: visitorToken,
           propertySlug: propertySlug,
-          currentPage: currentPath
+          currentPage: currentPath,
+          sessionStartTime: tabStartTime
         })
+      }).then(function (res) {
+        return res.json();
+      }).then(function (data) {
+        if (data && data.retrackNeeded) {
+          sendTracking(false);
+        }
       }).catch(function () {});
     } catch (e) {}
   }
@@ -105,13 +126,32 @@
   // 5-Second Active Heartbeat Ping
   setInterval(sendPing, 5000);
 
-  // Immediate ping when visitor switches tabs or focuses the window
+  // Background Web Worker: Continues pinging every 10s even when Chrome on mobile is minimized/backgrounded
+  try {
+    if (typeof Worker !== 'undefined' && typeof Blob !== 'undefined') {
+      var workerBlob = new Blob([
+        'setInterval(function() { postMessage("ping"); }, 10000);'
+      ], { type: 'application/javascript' });
+      var workerUrl = URL.createObjectURL(workerBlob);
+      var bgWorker = new Worker(workerUrl);
+      bgWorker.onmessage = function () {
+        sendPing();
+      };
+    }
+  } catch (workerErr) {}
+
+  // Immediate ping and session re-verify when visitor switches back to the tab or unlocks phone
   if (typeof document.addEventListener !== 'undefined') {
     document.addEventListener('visibilitychange', function () {
-      sendPing();
+      if (document.visibilityState === 'visible') {
+        sendPing();
+        sendTracking(false);
+      }
     });
   }
-  window.addEventListener('focus', sendPing);
+  window.addEventListener('focus', function () {
+    sendPing();
+  });
   window.addEventListener('pageshow', function () {
     sendTracking(false);
   });
@@ -130,9 +170,33 @@
   window.addEventListener('touchstart', onUserActive, { passive: true });
   window.addEventListener('keydown', onUserActive, { passive: true });
 
-  // Instant departure notification on tab close / mobile swipe
+  // Guard: Do not disconnect visitor if they click an internal link or submit a form on the same site
+  var isNavigatingInternally = false;
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest ? e.target.closest('a') : null;
+    if (a && a.href) {
+      try {
+        var linkUrl = new URL(a.href, window.location.href);
+        if (linkUrl.origin === window.location.origin) {
+          isNavigatingInternally = true;
+          setTimeout(function () {
+            isNavigatingInternally = false;
+          }, 4000);
+        }
+      } catch (err) {}
+    }
+  }, { capture: true, passive: true });
+
+  document.addEventListener('submit', function () {
+    isNavigatingInternally = true;
+    setTimeout(function () {
+      isNavigatingInternally = false;
+    }, 4000);
+  }, { capture: true, passive: true });
+
+  // Instant departure notification on tab close / window unload
   function handleOffline() {
-    if (isAdmin) return;
+    if (isAdmin || isNavigatingInternally) return;
     try {
       var payload = JSON.stringify({
         sessionId: tabSessionId,
@@ -154,8 +218,9 @@
     } catch (e) {}
   }
 
+  // Strictly trigger offline on actual tab closure / unload
+  // (NEVER on pagehide, because mobile Chrome fires pagehide on app switch / screen lock)
   window.addEventListener('beforeunload', handleOffline);
-  window.addEventListener('pagehide', handleOffline);
   window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe

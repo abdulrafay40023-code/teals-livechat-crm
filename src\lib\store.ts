@@ -306,6 +306,18 @@ class GranularStore {
   }
 
   async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
+    const existing = this.sessionCache.get(session.id);
+    if (existing?.created_at && !session.created_at) {
+      session.created_at = existing.created_at;
+    } else if (existing?.created_at && session.created_at) {
+      // Always preserve the earliest timestamp so duration stopwatch never resets
+      const existingTime = new Date(existing.created_at).getTime();
+      const newTime = new Date(session.created_at).getTime();
+      if (!isNaN(existingTime) && (!isNaN(newTime) ? existingTime < newTime : true)) {
+        session.created_at = existing.created_at;
+      }
+    }
+
     this.sessionCache.set(session.id, session);
     
     const key = `sessions/${sanitizeKey(session.id)}.json`;
@@ -319,6 +331,28 @@ class GranularStore {
     }
 
     return session;
+  }
+
+  async markSessionOffline(sessionId: string): Promise<StoreVisitorSession | null> {
+    const cleanId = sanitizeKey(sessionId);
+    let session = this.sessionCache.get(sessionId) || this.sessionCache.get(cleanId);
+    if (!session) {
+      session = await this.getSession(sessionId);
+    }
+    if (session) {
+      session.is_online = false;
+      session.last_active_at = new Date().toISOString();
+      this.sessionCache.set(session.id, session);
+      const key = `sessions/${sanitizeKey(session.id)}.json`;
+      try {
+        await supabaseAdmin.storage.from(BUCKET).upload(key, JSON.stringify(session), {
+          upsert: true,
+          contentType: 'application/json'
+        });
+      } catch {}
+      return session;
+    }
+    return null;
   }
 
   async removeSession(sessionId: string): Promise<void> {
@@ -517,7 +551,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 30 * 1000; // 30-second window: resilient during active browsing (5s pings) and rapidly cleans up on exit/kill
+    const HEARTBEAT_TIMEOUT = 120 * 1000; // 120-second (2 min) window: accommodates mobile background tabs while unload beacon ensures instant close
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 

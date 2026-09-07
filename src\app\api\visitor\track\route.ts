@@ -98,6 +98,10 @@ export async function POST(req: NextRequest) {
     const dev = parseUserAgent(userAgent);
     const nowIso = new Date().toISOString();
 
+    // Check if session already exists or tab start time was passed, so created_at NEVER resets on navigation or refresh
+    const existingSession = await granularStore.getSession(sid);
+    const createdAt = existingSession?.created_at || body.sessionStartTime || nowIso;
+
     const session: StoreVisitorSession = {
       id: sid,
       visitor_token: token,
@@ -114,7 +118,7 @@ export async function POST(req: NextRequest) {
       device: dev.device,
       is_online: true,
       last_active_at: nowIso,
-      created_at: nowIso
+      created_at: createdAt
     };
 
     if (isNewPageView) {
