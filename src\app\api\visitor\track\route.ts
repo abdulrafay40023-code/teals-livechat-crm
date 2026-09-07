@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
       flag: geo.flag,
       referrer: referrer || refererHeader || 'Direct',
       current_page: currentPage,
+      page_title: body.pageTitle || existingSession?.page_title || '',
       browser: dev.browser,
       os: dev.os,
       device: dev.device,

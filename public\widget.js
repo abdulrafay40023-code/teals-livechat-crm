@@ -74,10 +74,20 @@
     } catch (e) {}
   }
 
+  function getCurrentPageInfo() {
+    var path = window.location.pathname || '/';
+    var title = document.title || '';
+    return {
+      path: path,
+      fullUrl: window.location.href || '',
+      title: title
+    };
+  }
+
   function sendTracking(isNew) {
     if (isAdmin) return;
     try {
-      var currentUrl = window.location.href || window.location.pathname || '/';
+      var pageInfo = getCurrentPageInfo();
       var referrer = document.referrer || 'Direct';
 
       fetch(serverOrigin + '/api/visitor/track', {
@@ -87,7 +97,9 @@
           sessionId: tabSessionId,
           visitorToken: visitorToken,
           propertySlug: propertySlug,
-          currentPage: currentUrl,
+          currentPage: pageInfo.path,
+          fullUrl: pageInfo.fullUrl,
+          pageTitle: pageInfo.title,
           referrer: referrer,
           isNewPageView: isNew,
           sessionStartTime: tabStartTime
@@ -102,7 +114,7 @@
   function sendPing() {
     if (isAdmin) return;
     try {
-      var currentPath = window.location.pathname || '/';
+      var pageInfo = getCurrentPageInfo();
       fetch(serverOrigin + '/api/visitor/ping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -110,7 +122,9 @@
           sessionId: tabSessionId,
           visitorToken: visitorToken,
           propertySlug: propertySlug,
-          currentPage: currentPath,
+          currentPage: pageInfo.path,
+          fullUrl: pageInfo.fullUrl,
+          pageTitle: pageInfo.title,
           sessionStartTime: tabStartTime
         })
       }).then(function (res) {
@@ -121,6 +135,31 @@
         }
       }).catch(function () {});
     } catch (e) {}
+  }
+
+  // SPA navigation listener to immediately update active page
+  function onPageNavigated() {
+    setTimeout(function () {
+      sendPing();
+    }, 150);
+  }
+  window.addEventListener('popstate', onPageNavigated);
+  window.addEventListener('hashchange', onPageNavigated);
+  if (window.history && window.history.pushState) {
+    var _origPush = window.history.pushState;
+    window.history.pushState = function () {
+      var ret = _origPush.apply(this, arguments);
+      onPageNavigated();
+      return ret;
+    };
+  }
+  if (window.history && window.history.replaceState) {
+    var _origReplace = window.history.replaceState;
+    window.history.replaceState = function () {
+      var ret = _origReplace.apply(this, arguments);
+      onPageNavigated();
+      return ret;
+    };
   }
 
   // 5-Second Active Heartbeat Ping

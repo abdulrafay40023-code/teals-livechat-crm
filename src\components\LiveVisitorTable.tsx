@@ -16,6 +16,7 @@ export interface VisitorRecord {
   flag: string;
   referrer: string;
   current_page: string;
+  page_title?: string;
   browser: string;
   os: string;
   device: string;
@@ -23,6 +24,48 @@ export interface VisitorRecord {
   visit_count?: number;
   last_active_at: string;
   created_at: string;
+}
+
+function formatActivePage(page?: string, pageTitle?: string): { title: string; path: string; full: string } {
+  const p = (page || '/').trim();
+  let path = p;
+  try {
+    if (p.startsWith('http')) {
+      const u = new URL(p);
+      path = u.pathname;
+    }
+  } catch {}
+
+  const isHome = path === '/' || path === '';
+
+  let displayTitle = '';
+  if (pageTitle && pageTitle.trim()) {
+    const cleanTitle = pageTitle.split('|')[0].split(' - ')[0].split(' — ')[0].trim();
+    if (cleanTitle && cleanTitle.toLowerCase() !== 'home') {
+      displayTitle = cleanTitle;
+    }
+  }
+
+  if (!displayTitle) {
+    if (isHome) {
+      displayTitle = 'Home Page';
+    } else {
+      const parts = path.replace(/^\/+|\/+$/g, '').split('/');
+      const lastPart = parts[parts.length - 1] || 'Page';
+      displayTitle = lastPart
+        .split(/[-_]/)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+    }
+  }
+
+  const formattedPath = isHome ? '/' : (path.startsWith('/') ? path : '/' + path);
+
+  return {
+    title: displayTitle,
+    path: formattedPath,
+    full: pageTitle ? `${pageTitle} (${formattedPath})` : `${displayTitle} (${formattedPath})`
+  };
 }
 
 interface LiveVisitorTableProps {
@@ -182,9 +225,22 @@ export const LiveVisitorTable: React.FC<LiveVisitorTableProps> = ({
 
                     {/* Active Page */}
                     <td className="py-3.5 px-4">
-                      <span className="font-mono text-brand-secondary font-medium text-[11px] px-2 py-0.5 rounded bg-dark-bg border border-dark-border inline-block max-w-[180px] truncate" title={v.current_page}>
-                        {v.current_page}
-                      </span>
+                      {(() => {
+                        const pageInfo = formatActivePage(v.current_page, v.page_title);
+                        return (
+                          <div className="flex items-center space-x-1.5 max-w-[200px]" title={pageInfo.full}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0 animate-pulse" />
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[11px] font-bold text-white truncate leading-tight">
+                                {pageInfo.title}
+                              </span>
+                              <span className="font-mono text-[10px] text-brand-secondary/80 truncate leading-tight">
+                                {pageInfo.path}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Referrer */}

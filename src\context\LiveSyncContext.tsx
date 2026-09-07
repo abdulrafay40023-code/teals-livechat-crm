@@ -32,6 +32,7 @@ export interface LiveVisitor {
   flag: string;
   referrer: string;
   current_page: string;
+  page_title?: string;
   browser: string;
   os: string;
   device: string;
@@ -476,9 +477,10 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const raw = (payload as Record<string, unknown>)?.payload || payload;
         const sessionId = (raw as Record<string, unknown>)?.sessionId as string;
         const currentPage = (raw as Record<string, unknown>)?.currentPage as string;
+        const pageTitle = (raw as Record<string, unknown>)?.pageTitle as string | undefined;
         if (sessionId && currentPage) {
           setLiveVisitors((prev) =>
-            prev.map(v => (v.id === sessionId || v.visitor_token === sessionId) ? { ...v, current_page: currentPage } : v)
+            prev.map(v => (v.id === sessionId || v.visitor_token === sessionId) ? { ...v, current_page: currentPage, page_title: pageTitle || v.page_title } : v)
           );
         }
       })

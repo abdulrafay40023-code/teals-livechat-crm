@@ -17,7 +17,7 @@ export async function OPTIONS() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { sessionId, visitorToken, currentPage, isNewPageView, propertySlug = 'teals-crm', sessionStartTime } = body;
+    const { sessionId, visitorToken, currentPage, isNewPageView, propertySlug = 'teals-crm', sessionStartTime, pageTitle } = body;
 
     if (!sessionId) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
@@ -49,6 +49,10 @@ export async function POST(req: NextRequest) {
         session.created_at = sessionStartTime;
       }
 
+      if (pageTitle) {
+        session.page_title = pageTitle;
+      }
+
       // If network changed (e.g. mobile WiFi to 4G), update real IP & Geo
       if (ip && !isPrivateIp(ip) && ip !== session.ip_address) {
         session.ip_address = ip;
@@ -67,9 +71,10 @@ export async function POST(req: NextRequest) {
         session.flag = geo.flag;
       }
 
-      if (currentPage && currentPage !== session.current_page) {
+      if (currentPage && (currentPage !== session.current_page || (pageTitle && pageTitle !== session.page_title))) {
         session.current_page = currentPage;
-        await broadcastRealtimeEvent('visitor_navigation', { sessionId, currentPage });
+        session.page_title = pageTitle || session.page_title;
+        await broadcastRealtimeEvent('visitor_navigation', { sessionId, currentPage, pageTitle: session.page_title });
       }
       if (isNewPageView) {
         granularStore.incrementPageView();

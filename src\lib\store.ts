@@ -14,6 +14,7 @@ export interface StoreVisitorSession {
   flag: string;
   referrer: string;
   current_page: string;
+  page_title?: string;
   browser: string;
   os: string;
   device: string;
@@ -222,6 +223,7 @@ class GranularStore {
   readonly todayIps = new Map<string, Set<string>>();
   private totalViews = 0;
   private storageLoaded = false;
+  private sessionFileTimestamps = new Map<string, string>();
 
   constructor() {
     const adminGarry: StoreAgent = {
@@ -517,13 +519,18 @@ class GranularStore {
         await Promise.all(sFiles.map(async (f) => {
           try {
             const id = f.name.replace('.json', '');
-            if (!this.sessionCache.has(id)) {
+            const lastLoaded = this.sessionFileTimestamps.get(id);
+            const isStaleOrMissing = !this.sessionCache.has(id) || !lastLoaded || (f.updated_at && lastLoaded !== f.updated_at);
+            if (isStaleOrMissing) {
               const { data } = await supabaseAdmin.storage.from(BUCKET).download(`sessions/${f.name}`);
               if (data) {
                 const text = await parseStorageData(data);
                 if (text) {
                   const s: StoreVisitorSession = JSON.parse(text);
                   this.sessionCache.set(s.id, s);
+                  if (f.updated_at) {
+                    this.sessionFileTimestamps.set(id, f.updated_at);
+                  }
                 }
               }
             }
@@ -551,7 +558,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 120 * 1000; // 120-second (2 min) window: accommodates mobile background tabs while unload beacon ensures instant close
+    const HEARTBEAT_TIMEOUT = 180 * 1000; // 180-second (3 min) window: prevents premature drops on background mobile tabs while unload beacon ensures instant close
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
