@@ -556,7 +556,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 75 * 1000; // 75 seconds: accommodates browser background timer throttling (30-60s) so open tabs NEVER flicker or drop
+    const HEARTBEAT_TIMEOUT = 25 * 60 * 1000; // 25 minutes: ensures background tabs (desktop/mobile) stay solidly online without flickering
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
