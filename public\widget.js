@@ -162,8 +162,8 @@
     };
   }
 
-  // 5-Second Active Heartbeat Ping
-  setInterval(sendPing, 5000);
+  // 4-Second Active Heartbeat Ping
+  setInterval(sendPing, 4000);
 
   // Background Web Worker: Continues pinging every 10s even when Chrome on mobile is minimized/backgrounded
   try {

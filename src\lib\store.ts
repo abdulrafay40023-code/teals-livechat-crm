@@ -550,7 +550,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 10 * 60 * 1000; // 10 minutes: comfortably covers background tabs and 8-minute wake-up cycles so active tabs NEVER flicker or drop
+    const HEARTBEAT_TIMEOUT = 30 * 1000; // 30 seconds: strict Tawk.to-style timeout. User disappears within 30s of closing site.
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
