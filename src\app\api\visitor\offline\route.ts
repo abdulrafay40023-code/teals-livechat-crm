@@ -47,6 +47,18 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (req.method === 'GET') {
+      const gifBuffer = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
+      return new NextResponse(gifBuffer, {
+        status: 200,
+        headers: {
+          'Content-Type': 'image/gif',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-cache, no-store, must-revalidate'
+        }
+      });
+    }
+
     return new NextResponse(JSON.stringify({ success: true }), {
       status: 200,
       headers: {

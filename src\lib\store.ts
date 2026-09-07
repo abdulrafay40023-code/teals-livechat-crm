@@ -550,7 +550,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 70 * 1000; // 70 seconds: comfortably covers 60s browser background pings while quickly auto-cleaning closed sessions
+    const HEARTBEAT_TIMEOUT = 10 * 60 * 1000; // 10 minutes: comfortably covers background tabs and 8-minute wake-up cycles so active tabs NEVER flicker or drop
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 

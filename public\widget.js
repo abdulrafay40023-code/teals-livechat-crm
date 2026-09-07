@@ -234,30 +234,33 @@
     }, 4000);
   }, { capture: true, passive: true });
 
-  // Instant departure notification on actual tab close / window unload
+  // Instant departure notification on actual tab close / window unload / pagehide
   var offlineSent = false;
   function handleOffline(e) {
     if (isAdmin || isNavigatingInternally || offlineSent) return;
     offlineSent = true;
     try {
-      var payload = JSON.stringify({
-        sessionId: tabSessionId,
-        visitorToken: visitorToken,
-        propertySlug: propertySlug
-      });
-      var url = serverOrigin + '/api/visitor/offline?sessionId=' + encodeURIComponent(tabSessionId);
-      if (navigator.sendBeacon) {
-        // Plain text avoids CORS preflight so beacon transmits reliably on mobile and desktop unload
-        var blob = new Blob([payload], { type: 'text/plain' });
-        navigator.sendBeacon(url, blob);
-      } else {
-        fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain' },
-          body: payload,
-          keepalive: true
-        }).catch(function () {});
-      }
+      var url = serverOrigin + '/api/visitor/offline?sessionId=' + encodeURIComponent(tabSessionId) + '&_t=' + Date.now();
+
+      // 1. Synchronous Image GET Beacon (zero CORS preflight, guaranteed transmission on Android Chrome, iOS Safari & Desktop)
+      try {
+        var img = new Image();
+        img.src = url;
+      } catch (imgErr) {}
+
+      // 2. Standard navigator.sendBeacon
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon(url, 'offline');
+        }
+      } catch (beaconErr) {}
+
+      // 3. fetch with keepalive
+      try {
+        if (typeof fetch !== 'undefined') {
+          fetch(url, { method: 'POST', keepalive: true, mode: 'no-cors' }).catch(function () {});
+        }
+      } catch (fetchErr) {}
     } catch (e) {}
   }
 
