@@ -550,7 +550,23 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 30 * 1000; // 30 seconds: strict Tawk.to-style timeout. User disappears within 30s of closing site.
+    // Adaptive Activity Checker:
+    // 1. Established visitors / background tabs (duration > 60s, like Tulsa desktop Chrome in background):
+    //    Modern browsers throttle inactive background tabs to wake up every 5-10 minutes.
+    //    We grant a 15-minute window so active background tabs NEVER flicker or disappear!
+    // 2. Fresh arrivals / test visits (duration <= 60s):
+    //    We keep a tight 45-second window so quick test sessions or bounces drop promptly if tab closed without beacon.
+    const isSessionActive = (s: StoreVisitorSession): boolean => {
+      if (!s.is_online) return false;
+      const lastActive = new Date(s.last_active_at).getTime();
+      if (isNaN(lastActive)) return false;
+
+      const createdAt = new Date(s.created_at || s.last_active_at).getTime();
+      const totalSessionDuration = !isNaN(createdAt) ? (now - createdAt) : 0;
+      const timeout = totalSessionDuration > 60 * 1000 ? 15 * 60 * 1000 : 45 * 1000;
+      return (now - lastActive) < timeout;
+    };
+
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
@@ -563,10 +579,7 @@ class GranularStore {
 
     const isGlobal = !propertySlug || propertySlug === 'all' || propertySlug === 'teals-crm';
     const filteredSessions = isGlobal ? allSessions : allSessions.filter(s => s.property_slug === propertySlug);
-    const rawLiveSessions = filteredSessions.filter(s => {
-      const lastActive = new Date(s.last_active_at).getTime();
-      return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
-    });
+    const rawLiveSessions = filteredSessions.filter(isSessionActive);
 
     // Deduplicate by visitor_token / session ID: distinct devices on the same IP each appear as separate rows
     const liveVisitorsMap = new Map<string, StoreVisitorSession>();
@@ -660,10 +673,7 @@ class GranularStore {
     Object.keys(WEBSITES).forEach(slug => {
       const siteSessions = allSessions.filter(s => isSessionForWebsite(s, slug));
 
-      const siteLiveSessions = siteSessions.filter(s => {
-        const lastActive = new Date(s.last_active_at).getTime();
-        return s.is_online && (now - lastActive < HEARTBEAT_TIMEOUT);
-      });
+      const siteLiveSessions = siteSessions.filter(isSessionActive);
       const siteLiveMap = new Map<string, StoreVisitorSession>();
       siteLiveSessions.forEach(s => {
         const key = s.visitor_token || s.id;

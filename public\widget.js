@@ -266,7 +266,6 @@
 
   // Trigger offline when tab or window is closed on desktop or mobile
   window.addEventListener('beforeunload', handleOffline);
-  window.addEventListener('pagehide', handleOffline);
   window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe
