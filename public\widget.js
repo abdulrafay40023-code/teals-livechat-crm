@@ -233,10 +233,14 @@
     }, 4000);
   }, { capture: true, passive: true });
 
-  // Instant departure notification on tab close / window unload
-  function handleOffline() {
+  // Instant departure notification on tab close / mobile close / window unload
+  function handleOffline(e) {
     if (isAdmin || isNavigatingInternally) return;
     try {
+      try {
+        sessionStorage.removeItem('teals_tab_start_time');
+      } catch (storageErr) {}
+
       var payload = JSON.stringify({
         sessionId: tabSessionId,
         visitorToken: visitorToken,
@@ -257,9 +261,9 @@
     } catch (e) {}
   }
 
-  // Strictly trigger offline on actual tab closure / unload
-  // (NEVER on pagehide, because mobile Chrome fires pagehide on app switch / screen lock)
+  // Trigger offline when tab is closed, navigated away, or closed on mobile
   window.addEventListener('beforeunload', handleOffline);
+  window.addEventListener('pagehide', handleOffline);
   window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe

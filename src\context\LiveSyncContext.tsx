@@ -488,14 +488,19 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         console.log('[SYNC_DEBUG] WebSocket visitor_offline event received:', payload);
         const raw = (payload as Record<string, unknown>)?.payload || payload;
         const sessionId = (raw as Record<string, unknown>)?.sessionId as string;
+        const ip = (raw as Record<string, unknown>)?.ip as string;
 
-        if (sessionId) {
+        if (sessionId || ip) {
           setTimeout(() => {
             if (sessionId) recentArrivalTimestamps.current.delete(sessionId);
-          }, 30000);
+            if (ip) recentArrivalTimestamps.current.delete(ip);
+          }, 15000);
 
           setLiveVisitors((prev) => {
-            const nextList = prev.filter(v => v.id !== sessionId && v.visitor_token !== sessionId);
+            const nextList = prev.filter(v => 
+              (!sessionId || (v.id !== sessionId && v.visitor_token !== sessionId)) &&
+              (!ip || v.ip_address !== ip)
+            );
             setLiveCount(nextList.length);
             return nextList;
           });

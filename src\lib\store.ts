@@ -309,10 +309,8 @@ class GranularStore {
 
   async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
     const existing = this.sessionCache.get(session.id);
-    if (existing?.created_at && !session.created_at) {
-      session.created_at = existing.created_at;
-    } else if (existing?.created_at && session.created_at) {
-      // Always preserve the earliest timestamp so duration stopwatch never resets
+    // Only preserve created_at if the existing session is ALREADY online in the same active visit
+    if (existing && existing.is_online && existing.created_at) {
       const existingTime = new Date(existing.created_at).getTime();
       const newTime = new Date(session.created_at).getTime();
       if (!isNaN(existingTime) && (!isNaN(newTime) ? existingTime < newTime : true)) {
@@ -558,7 +556,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 180 * 1000; // 180-second (3 min) window: prevents premature drops on background mobile tabs while unload beacon ensures instant close
+    const HEARTBEAT_TIMEOUT = 25 * 1000; // 25-second window: fast auto-cleanup on close while active 5s pings keep visitor online
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
