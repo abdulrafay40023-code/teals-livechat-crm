@@ -98,11 +98,10 @@ export async function POST(req: NextRequest) {
     const dev = parseUserAgent(userAgent);
     const nowIso = new Date().toISOString();
 
-    // If visitor is continuing an ACTIVE online visit, preserve created_at so page transitions don't reset duration.
-    // If the visitor was offline or this is a fresh arrival, start fresh from nowIso!
+    // Preserve session created_at for this tab so page navigation and tab reactivation never reset duration.
+    // When a user closes the site and opens a new tab, sid is brand new so a fresh visit starts from nowIso.
     const existingSession = await granularStore.getSession(sid);
-    const isContinuingVisit = !!(existingSession && existingSession.is_online === true);
-    const createdAt = isContinuingVisit ? (existingSession.created_at || nowIso) : nowIso;
+    const createdAt = existingSession?.created_at || body.sessionStartTime || nowIso;
 
     const session: StoreVisitorSession = {
       id: sid,

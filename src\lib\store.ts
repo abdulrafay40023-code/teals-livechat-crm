@@ -556,7 +556,7 @@ class GranularStore {
     await this.ensureStorageLoaded();
 
     const now = Date.now();
-    const HEARTBEAT_TIMEOUT = 25 * 1000; // 25-second window: fast auto-cleanup on close while active 5s pings keep visitor online
+    const HEARTBEAT_TIMEOUT = 75 * 1000; // 75 seconds: accommodates browser background timer throttling (30-60s) so open tabs NEVER flicker or drop
     const allSessions = Array.from(this.sessionCache.values());
     const allConvs = Array.from(this.convCache.values());
 
@@ -584,8 +584,21 @@ class GranularStore {
         ...s,
         visit_count: visits
       };
-      if (!existing || new Date(s.last_active_at).getTime() > new Date(existing.last_active_at).getTime()) {
+      if (!existing) {
         liveVisitorsMap.set(key, enrichedSession);
+      } else {
+        // Keep the session with latest activity, but preserve earliest created_at so duration doesn't jump
+        const oldestCreatedAt = new Date(existing.created_at).getTime() < new Date(s.created_at).getTime()
+          ? existing.created_at
+          : s.created_at;
+        const latestActiveSession = new Date(s.last_active_at).getTime() > new Date(existing.last_active_at).getTime()
+          ? s
+          : existing;
+        liveVisitorsMap.set(key, {
+          ...latestActiveSession,
+          created_at: oldestCreatedAt,
+          visit_count: visits
+        });
       }
     });
     const liveVisitors = Array.from(liveVisitorsMap.values());

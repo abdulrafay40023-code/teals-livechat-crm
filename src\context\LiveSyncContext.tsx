@@ -497,10 +497,15 @@ export const LiveSyncProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           }, 15000);
 
           setLiveVisitors((prev) => {
-            const nextList = prev.filter(v => 
-              (!sessionId || (v.id !== sessionId && v.visitor_token !== sessionId)) &&
-              (!ip || v.ip_address !== ip)
-            );
+            const nextList = prev.filter(v => {
+              if (sessionId) {
+                return v.id !== sessionId && v.visitor_token !== sessionId;
+              }
+              if (ip) {
+                return v.ip_address !== ip;
+              }
+              return true;
+            });
             setLiveCount(nextList.length);
             return nextList;
           });

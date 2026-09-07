@@ -233,14 +233,11 @@
     }, 4000);
   }, { capture: true, passive: true });
 
-  // Instant departure notification on tab close / mobile close / window unload
+  // Instant departure notification on actual tab close / window unload
   function handleOffline(e) {
     if (isAdmin || isNavigatingInternally) return;
+    if (e && e.persisted) return; // Ignore BFCache page suspension so background tabs stay online
     try {
-      try {
-        sessionStorage.removeItem('teals_tab_start_time');
-      } catch (storageErr) {}
-
       var payload = JSON.stringify({
         sessionId: tabSessionId,
         visitorToken: visitorToken,
@@ -261,9 +258,8 @@
     } catch (e) {}
   }
 
-  // Trigger offline when tab is closed, navigated away, or closed on mobile
+  // Trigger offline when tab or window is actually closed
   window.addEventListener('beforeunload', handleOffline);
-  window.addEventListener('pagehide', handleOffline);
   window.addEventListener('unload', handleOffline);
 
   // Embed Live Chat Iframe
