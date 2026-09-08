@@ -23,6 +23,9 @@ export async function POST(req: NextRequest) {
     } else if (cleanEmail === 'annusraees@gmail.com') {
       defaultName = 'Annus Raees';
       defaultId = 'agent_annus_admin';
+    } else if (cleanEmail === 'jennifer.cisternino2027@gmail.com') {
+      defaultName = 'Murtuza Mehdi';
+      defaultId = 'agent_25mowqm';
     }
 
     let agent = granularStore.agents.get(cleanEmail);

@@ -92,7 +92,7 @@ export const LiveChatConsole: React.FC<LiveChatConsoleProps> = ({
   const agentInputRef = useRef<HTMLTextAreaElement>(null);
 
   // ROLE-BASED VISIBILITY FILTERING
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
   const isAdmin = currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
   const { readConvMap, deleteConversation } = useLiveSync();

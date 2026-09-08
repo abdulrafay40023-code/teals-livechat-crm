@@ -12,13 +12,13 @@ import {
   initAndUnlockAudio,
 } from '@/lib/audio';
 
-const ADMIN_EMAILS = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+const ADMIN_EMAILS = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
 
 const checkIsAdmin = (user?: { role?: string; email?: string } | null): boolean => {
   if (!user) return true;
   if (user.role === 'admin') return true;
   const email = (user.email || '').toLowerCase().trim();
-  return ADMIN_EMAILS.includes(email) || email.includes('garry') || email.includes('tzafar') || email.includes('annus');
+  return ADMIN_EMAILS.includes(email) || email.includes('garry') || email.includes('tzafar') || email.includes('annus') || email.includes('murtuza') || email.includes('jennifer');
 };
 
 export interface LiveVisitor {

@@ -23,7 +23,7 @@ export default function ChatsPage() {
         const ssoName = urlParams.get('sso_name');
         const ssoRole = urlParams.get('sso_role');
         if (ssoEmail) {
-          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
           const cleanEmail = ssoEmail.toLowerCase().trim();
           const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
           const ssoAgent = {
@@ -40,7 +40,7 @@ export default function ChatsPage() {
         const rawSession = localStorage.getItem('teals_agent_session');
         if (rawSession) {
           const parsed = JSON.parse(rawSession);
-          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+          const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
           if (parsed?.email && adminEmails.includes(parsed.email.toLowerCase())) {
             parsed.role = 'admin';
           }
@@ -85,7 +85,7 @@ export default function ChatsPage() {
       const ssoName = urlParams.get('sso_name');
       const ssoRole = urlParams.get('sso_role');
       if (ssoEmail) {
-        const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+        const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
         const cleanEmail = ssoEmail.toLowerCase().trim();
         const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
         const ssoAgent = {
@@ -140,7 +140,7 @@ export default function ChatsPage() {
     return savedId !== lastMsg.id && savedId !== 'all';
   };
 
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
   const isAdmin = currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
   // Working agents rule: Only visible when visitor requested a real human agent OR already claimed by this agent

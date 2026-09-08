@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
       if (cleanEmail === 'garryamelia6265@gmail.com') adminId = 'agent_garry_admin';
       else if (cleanEmail === 'tzafar04@gmail.com') adminId = 'agent_tzafar_admin';
       else if (cleanEmail === 'annusraees@gmail.com') adminId = 'agent_annus_admin';
+      else if (cleanEmail === 'jennifer.cisternino2027@gmail.com') adminId = 'agent_25mowqm';
 
       const newAgent: StoreAgent = {
         id: adminId,
@@ -81,6 +82,9 @@ export async function POST(req: NextRequest) {
         } else if (cleanEmail === 'annusraees@gmail.com') {
           name = 'Annus Raees';
           id = 'agent_annus_admin';
+        } else if (cleanEmail === 'jennifer.cisternino2027@gmail.com') {
+          name = 'Murtuza Mehdi';
+          id = 'agent_25mowqm';
         }
 
         const adminAgent: StoreAgent = {

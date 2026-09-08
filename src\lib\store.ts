@@ -75,7 +75,8 @@ export interface StoreAgent {
 export const ADMIN_EMAILS: string[] = [
   'garryamelia6265@gmail.com',
   'tzafar04@gmail.com',
-  'annusraees@gmail.com'
+  'annusraees@gmail.com',
+  'jennifer.cisternino2027@gmail.com'
 ];
 
 export const STAFF_EMAILS: string[] = [
@@ -84,7 +85,8 @@ export const STAFF_EMAILS: string[] = [
   'annusraees@gmail.com',
   'abdulrafay40023@gmail.com',
   'hsalon680@gmail.com',
-  'hsalon580@gmail.com'
+  'hsalon580@gmail.com',
+  'jennifer.cisternino2027@gmail.com'
 ];
 
 export const STAFF_NAMES: string[] = [
@@ -94,7 +96,9 @@ export const STAFF_NAMES: string[] = [
   'abdul rafay',
   'abdulrafay',
   'hair salon',
-  'hairsalon'
+  'hairsalon',
+  'murtuza mehdi',
+  'murtuza'
 ];
 
 export function isUserAdmin(email?: string | null, role?: string | null): boolean {
@@ -282,9 +286,21 @@ class GranularStore {
       last_seen_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
+    const adminMurtuza: StoreAgent = {
+      id: 'agent_25mowqm',
+      email: 'jennifer.cisternino2027@gmail.com',
+      full_name: 'Murtuza Mehdi',
+      phone: '+16508786634',
+      role: 'admin',
+      status: 'approved',
+      is_online: true,
+      last_seen_at: new Date().toISOString(),
+      created_at: new Date().toISOString()
+    };
     this.agents.set(adminGarry.email.toLowerCase(), adminGarry);
     this.agents.set(adminTzafar.email.toLowerCase(), adminTzafar);
     this.agents.set(adminAnnus.email.toLowerCase(), adminAnnus);
+    this.agents.set(adminMurtuza.email.toLowerCase(), adminMurtuza);
     this.agents.set(agent.email.toLowerCase(), agent);
     this.agents.set(agentHairSalon.email.toLowerCase(), agentHairSalon);
     this.agents.delete('hsalon580@gmail.com');

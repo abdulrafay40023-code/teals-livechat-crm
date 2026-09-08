@@ -40,7 +40,7 @@ export default function AdminPage() {
     }
     try {
       const agent = JSON.parse(rawSession);
-      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
       const isAdm = agent.role === 'admin' || (agent.email && adminEmails.includes(agent.email.toLowerCase()));
       if (!isAdm) {
         router.push('/dashboard');
@@ -181,7 +181,7 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {approvedAgents.map((agent) => {
-            const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+            const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
             const isAdminAgent = agent.role === 'admin' || (agent.email && adminEmails.includes(agent.email.toLowerCase()));
 
             return (

@@ -40,7 +40,7 @@ export default function OverviewDashboard() {
     } catch {}
   }, []);
 
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
   const isAdmin = !currentAgent || currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
   // Working agents rule: Only visible when visitor requested a real human agent OR already claimed by this agent
