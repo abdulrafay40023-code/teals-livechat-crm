@@ -54,7 +54,9 @@ export default function AdminPage() {
 
   const fetchAgents = async () => {
     try {
-      const res = await fetch('/api/agent/approvals');
+      const res = await fetch(`/api/agent/approvals?_t=${Date.now()}`, {
+        cache: 'no-store'
+      });
       if (res.ok) {
         const data = await res.json();
         setPendingAgents(data.pendingAgents || []);
@@ -75,28 +77,52 @@ export default function AdminPage() {
   const [removingAgentId, setRemovingAgentId] = useState<string | null>(null);
 
   const handleApprove = async (agentId: string) => {
+    // Instant optimistic update
+    const target = pendingAgents.find(a => a.id === agentId);
+    setPendingAgents(prev => prev.filter(a => a.id !== agentId));
+    if (target) {
+      setApprovedAgents(prev => {
+        if (prev.some(a => a.id === agentId || a.email.toLowerCase() === target.email.toLowerCase())) return prev;
+        return [...prev, {
+          ...target,
+          role: 'agent',
+          status: 'approved',
+          is_online: true,
+          last_seen_at: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        }];
+      });
+    }
+
     try {
       const res = await fetch('/api/agent/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId, action: 'approve' })
       });
-      if (res.ok) fetchAgents();
+      if (res.ok) {
+        await fetchAgents();
+      }
     } catch (err) {
       console.error(err);
+      fetchAgents();
     }
   };
 
   const handleReject = async (agentId: string) => {
+    setPendingAgents(prev => prev.filter(a => a.id !== agentId));
     try {
       const res = await fetch('/api/agent/approvals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ agentId, action: 'reject' })
       });
-      if (res.ok) fetchAgents();
+      if (res.ok) {
+        await fetchAgents();
+      }
     } catch (err) {
       console.error(err);
+      fetchAgents();
     }
   };
 

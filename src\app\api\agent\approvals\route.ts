@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { granularStore } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 
-export async function GET() {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export async function GET(req: NextRequest) {
   try {
     const allAgents = await granularStore.getAllAgents();
     const pendingAgents = allAgents.filter(a => a.status === 'pending');
@@ -14,6 +17,12 @@ export async function GET() {
       approvedAgents,
       onlineAgents,
       totalAgents: allAgents.length
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error';

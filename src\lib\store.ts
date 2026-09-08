@@ -150,16 +150,17 @@ function sanitizeKey(k: string): string {
 
 async function parseStorageData(data: unknown): Promise<string> {
   if (!data) return '';
-  const anyData = data as { arrayBuffer?: () => Promise<ArrayBuffer>; text?: () => Promise<string> };
+  const anyData = data as { text?: () => Promise<string>; arrayBuffer?: () => Promise<ArrayBuffer> };
+  if (typeof anyData.text === 'function') {
+    try {
+      const res = await anyData.text();
+      if (res && res !== '[object Blob]') return res;
+    } catch {}
+  }
   if (typeof anyData.arrayBuffer === 'function') {
     try {
       const buf = Buffer.from(await anyData.arrayBuffer());
       return buf.toString('utf-8');
-    } catch {}
-  }
-  if (typeof anyData.text === 'function') {
-    try {
-      return await anyData.text();
     } catch {}
   }
   return String(data);

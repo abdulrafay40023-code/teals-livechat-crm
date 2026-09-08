@@ -3,6 +3,9 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { memoryStore, granularStore, StoreAgent, ADMIN_EMAILS } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export async function POST(req: NextRequest) {
   try {
     const { email, fullName, phone, action } = await req.json();
@@ -14,11 +17,8 @@ export async function POST(req: NextRequest) {
     const cleanEmail = email.toLowerCase().trim();
     const isAdmin = ADMIN_EMAILS.includes(cleanEmail) || cleanEmail === (process.env.ADMIN_EMAIL || '').toLowerCase();
 
-    // Check Memory Store & Supabase Storage
-    let agent = memoryStore.agents.get(cleanEmail);
-    if (!agent) {
-      agent = (await granularStore.getAgent(cleanEmail)) || undefined;
-    }
+    // Check Cloud Storage & Memory Store (fresh check so Admin approvals are reflected immediately)
+    let agent = (await granularStore.getAgent(cleanEmail)) || memoryStore.agents.get(cleanEmail) || undefined;
 
     if (action === 'complete_profile') {
       if (!fullName || !phone) {
