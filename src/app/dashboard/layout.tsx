@@ -107,44 +107,27 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
 
         if (ssoEmail) {
           const cleanEmail = ssoEmail.toLowerCase().trim();
-          const isAdm = adminEmails.includes(cleanEmail);
-          const isPreApproved = isAdm || preApprovedAgents.includes(cleanEmail);
+          const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
 
-          if (isPreApproved) {
-            resolvedAgent = {
-              id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          resolvedAgent = {
+            id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+            email: cleanEmail,
+            full_name: ssoName || cleanEmail.split('@')[0],
+            role: isAdm ? 'admin' : (ssoRole || 'agent'),
+            status: 'approved'
+          };
+          localStorage.setItem('teals_agent_session', JSON.stringify(resolvedAgent));
+
+          fetch('/api/agent/ping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
               email: cleanEmail,
-              full_name: ssoName || cleanEmail.split('@')[0],
-              role: isAdm ? 'admin' : (ssoRole || 'agent'),
-              status: 'approved'
-            };
-          } else {
-            try {
-              const res = await fetch('/api/agent/ping', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: cleanEmail, status: 'online' })
-              });
-              if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'approved' || data.agent?.status === 'approved') {
-                  resolvedAgent = data.agent || {
-                    id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
-                    email: cleanEmail,
-                    full_name: ssoName || cleanEmail.split('@')[0],
-                    role: 'agent',
-                    status: 'approved'
-                  };
-                }
-              }
-            } catch {}
-
-            if (!resolvedAgent) {
-              localStorage.removeItem('teals_agent_session');
-              window.location.href = '/login';
-              return;
-            }
-          }
+              fullName: resolvedAgent.full_name,
+              role: resolvedAgent.role,
+              status: 'online'
+            })
+          }).catch(() => {});
         }
       }
 

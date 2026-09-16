@@ -28,32 +28,25 @@ export async function POST(req: NextRequest) {
       defaultId = 'agent_25mowqm';
     }
 
-    let agent = (await granularStore.getAgent(cleanEmail)) || granularStore.agents.get(cleanEmail) || undefined;
-
-    if (!isAdmin) {
-      if (!agent || agent.status !== 'approved') {
-        const all = await granularStore.getAllAgents();
-        const found = all.find(a => (a.email && a.email.toLowerCase() === cleanEmail) || (a.id && a.id.toLowerCase() === cleanEmail));
-        if (found && found.status === 'approved') {
-          agent = found;
-          granularStore.agents.set(cleanEmail, agent);
-        } else {
-          return NextResponse.json({
-            success: false,
-            error: 'Agent access revoked or approval required',
-            status: agent?.status || found?.status || 'pending'
-          }, { status: 403 });
-        }
-      }
+    // Check if agent was explicitly rejected/removed
+    const isRejected = await granularStore.isAgentRejected(cleanEmail);
+    if (isRejected && !isAdmin) {
+      return NextResponse.json({
+        success: false,
+        error: 'Agent access revoked by administrator',
+        status: 'rejected'
+      }, { status: 403 });
     }
+
+    let agent = (await granularStore.getAgent(cleanEmail)) || granularStore.agents.get(cleanEmail) || undefined;
 
     if (!agent) {
       agent = {
         id: defaultId,
         email: cleanEmail,
-        full_name: fullName || defaultName,
+        full_name: fullName || defaultName || cleanEmail.split('@')[0],
         phone: phone || '+1 (555) 019-2834',
-        role: 'admin',
+        role: isAdmin ? 'admin' : (role || 'agent'),
         status: 'approved',
         is_online: true,
         last_seen_at: nowIso,
@@ -64,6 +57,8 @@ export async function POST(req: NextRequest) {
       agent.last_seen_at = nowIso;
       if (isAdmin) {
         agent.role = 'admin';
+        agent.status = 'approved';
+      } else if (agent.status !== 'rejected') {
         agent.status = 'approved';
       }
       if (fullName) agent.full_name = fullName;

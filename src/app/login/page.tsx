@@ -31,10 +31,13 @@ export default function LoginPage() {
 
   // Check if already authenticated or pending
   useEffect(() => {
-    // If opened directly outside CRM iframe, redirect to CRM
+    // If opened directly outside CRM iframe without auth code/tokens, redirect to CRM
     if (typeof window !== 'undefined' && window.self === window.top) {
-      window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
-      return;
+      const isAuthCallback = window.location.hash || window.location.search.includes('code=') || window.location.search.includes('access_token=');
+      if (!isAuthCallback) {
+        window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
+        return;
+      }
     }
 
     // Check pending state in localStorage
@@ -261,15 +264,29 @@ export default function LoginPage() {
     setError('');
     setGoogleLoading(true);
     try {
-      // If embedded in an iframe (e.g. CRM), open in clean top window/tab so Google never blocks with 403!
       const isIframe = typeof window !== 'undefined' && window.self !== window.top;
-      if (isIframe) {
-        window.open('https://teals-livechat-saas.vercel.app/login', '_blank');
-        setGoogleLoading(false);
-        return;
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://teals-livechat-saas.vercel.app';
+
+      if (isIframe && window.top) {
+        // Trigger Google OAuth on top CRM window
+        const { data, error: authErr } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: 'https://salesflow-ai-main.vercel.app/livechat',
+            skipBrowserRedirect: true
+          }
+        });
+        if (authErr) {
+          setError(authErr.message);
+          setGoogleLoading(false);
+          return;
+        }
+        if (data?.url) {
+          window.top.location.href = data.url;
+          return;
+        }
       }
 
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://teals-livechat-saas.vercel.app';
       const { error: authErr } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

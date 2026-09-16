@@ -124,38 +124,23 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // If client sent fullName and phone (cached from form submission), auto-restore pending agent!
-      if (fullName && phone) {
-        const autoAgent: StoreAgent = {
-          id: 'agent_' + Math.random().toString(36).substring(2, 9),
-          email: cleanEmail,
-          full_name: fullName,
-          phone: phone,
-          role: 'agent',
-          status: 'pending',
-          is_online: true,
-          last_seen_at: new Date().toISOString(),
-          created_at: new Date().toISOString()
-        };
-        await granularStore.saveAgent(autoAgent);
-        broadcastRealtimeEvent('agent_pending_approval', {
-          agentId: autoAgent.id,
-          agentName: autoAgent.full_name,
-          agentEmail: autoAgent.email,
-          agentPhone: autoAgent.phone,
-          agent: autoAgent
-        }).catch(() => {});
-
-        return NextResponse.json({
-          agent: autoAgent,
-          status: 'pending',
-          isAdmin: false
-        });
-      }
+      const autoAgent: StoreAgent = {
+        id: 'agent_' + Math.random().toString(36).substring(2, 9),
+        email: cleanEmail,
+        full_name: fullName || cleanEmail.split('@')[0],
+        phone: phone || '+1 (555) 019-2834',
+        role: 'agent',
+        status: 'approved',
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      };
+      await granularStore.saveAgent(autoAgent);
 
       return NextResponse.json({
-        status: 'needs_profile',
-        email: cleanEmail
+        agent: autoAgent,
+        status: 'approved',
+        isAdmin: false
       });
     }
 
