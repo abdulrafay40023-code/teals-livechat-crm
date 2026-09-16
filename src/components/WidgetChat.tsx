@@ -228,8 +228,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
 
   const handleFullWipe = useCallback(() => {
     try {
+      const lastReset = localStorage.getItem('teals_last_reset_ack');
       Object.keys(localStorage).forEach(k => {
-        if (k.startsWith('teals_')) {
+        if (k.startsWith('teals_') && k !== 'teals_last_reset_ack') {
           localStorage.removeItem(k);
         }
       });
@@ -238,6 +239,9 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           sessionStorage.removeItem(k);
         }
       });
+      if (lastReset) {
+        localStorage.setItem('teals_last_reset_ack', lastReset);
+      }
     } catch {}
     setConversationId(null);
     setSavedConversations([]);
@@ -273,6 +277,20 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
       const res = await fetch(`/api/chat/message?visitorToken=${encodeURIComponent(token)}${cleanEmail ? `&email=${encodeURIComponent(cleanEmail)}` : ''}`);
       if (res.ok) {
         const data = await res.json();
+        const serverResetAt = data.serverResetAt || 0;
+        let localAckReset = 0;
+        try {
+          localAckReset = parseInt(localStorage.getItem('teals_last_reset_ack') || '0', 10);
+        } catch {}
+
+        if (serverResetAt > 0 && serverResetAt > localAckReset) {
+          try {
+            localStorage.setItem('teals_last_reset_ack', String(serverResetAt));
+          } catch {}
+          handleFullWipe();
+          return;
+        }
+
         if (data.conversations && Array.isArray(data.conversations) && data.conversations.length > 0) {
           const mapped: SavedConvSummary[] = data.conversations.map((c: any) => {
             const lastMsg = c.messages?.[c.messages.length - 1]?.content || DEFAULT_GREETING;
@@ -285,12 +303,16 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           });
 
           setSavedConversations(prev => {
-            // Preserve local list if server list is temporarily smaller due to async replication latency
             if (prev.length > mapped.length) return prev;
             return mapped;
           });
           try {
             localStorage.setItem('teals_visitor_conv_list', JSON.stringify(mapped));
+          } catch {}
+        } else {
+          setSavedConversations([]);
+          try {
+            localStorage.removeItem('teals_visitor_conv_list');
           } catch {}
         }
       }
@@ -413,6 +435,20 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         });
         if (res.ok) {
           const data = await res.json();
+          const serverResetAt = data.serverResetAt || 0;
+          let localAckReset = 0;
+          try {
+            localAckReset = parseInt(localStorage.getItem('teals_last_reset_ack') || '0', 10);
+          } catch {}
+
+          if (serverResetAt > 0 && serverResetAt > localAckReset) {
+            try {
+              localStorage.setItem('teals_last_reset_ack', String(serverResetAt));
+            } catch {}
+            handleFullWipe();
+            return;
+          }
+
           const serverMsgs: any[] = data.conversation?.messages || data.messages || [];
           if (serverMsgs.length > 0) {
             setMessages(prev => {
@@ -624,8 +660,16 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
           setMessages(prev => prev.map(m => m.sender_type === 'visitor' ? { ...m, status: 'read' as const } : m));
         }
       })
-      .on('broadcast', { event: 'stats_reset' }, handleFullWipe)
-      .on('broadcast', { event: 'system_reset' }, handleFullWipe)
+      .on('broadcast', { event: 'stats_reset' }, (payload: any) => {
+        const resetAt = payload?.payload?.resetAt || payload?.resetAt || Date.now();
+        try { localStorage.setItem('teals_last_reset_ack', String(resetAt)); } catch {}
+        handleFullWipe();
+      })
+      .on('broadcast', { event: 'system_reset' }, (payload: any) => {
+        const resetAt = payload?.payload?.resetAt || payload?.resetAt || Date.now();
+        try { localStorage.setItem('teals_last_reset_ack', String(resetAt)); } catch {}
+        handleFullWipe();
+      })
       .subscribe();
 
     const fetchFullHistory = async () => {
@@ -636,6 +680,20 @@ export const WidgetChat: React.FC<WidgetChatProps> = ({
         });
         if (res.ok) {
           const data = await res.json();
+          const serverResetAt = data.serverResetAt || 0;
+          let localAckReset = 0;
+          try {
+            localAckReset = parseInt(localStorage.getItem('teals_last_reset_ack') || '0', 10);
+          } catch {}
+
+          if (serverResetAt > 0 && serverResetAt > localAckReset) {
+            try {
+              localStorage.setItem('teals_last_reset_ack', String(serverResetAt));
+            } catch {}
+            handleFullWipe();
+            return;
+          }
+
           // If conversation has no server messages yet (newly started local chat):
           if (!data.conversation && (!data.messages || data.messages.length === 0)) {
             return;
