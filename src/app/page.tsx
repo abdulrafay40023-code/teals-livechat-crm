@@ -4,7 +4,6 @@ import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Shield, ArrowRight } from 'lucide-react';
-import { WidgetChat } from '@/components/WidgetChat';
 import { supabase } from '@/lib/supabase';
 
 export default function HomePage() {
@@ -121,9 +120,6 @@ export default function HomePage() {
       <footer className="text-center text-xs text-dark-muted py-4 border-t border-dark-border z-10">
         Teals CRM LiveChat Suite &copy; {new Date().getFullYear()} — Built with Supabase & Google Gemini AI.
       </footer>
-
-      {/* Floating Embedded LiveChat Widget */}
-      <WidgetChat propertySlug="teals-crm" />
     </div>
   );
 }

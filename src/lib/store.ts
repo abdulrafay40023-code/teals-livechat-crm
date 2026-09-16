@@ -322,6 +322,10 @@ class GranularStore {
   }
 
   async saveSession(session: StoreVisitorSession): Promise<StoreVisitorSession> {
+    if (session.property_slug === 'teals-crm' || session.property_slug === 'salesflow-ai-main' || !session.property_slug) {
+      return session;
+    }
+
     const existing = this.sessionCache.get(session.id);
     // Only preserve created_at if the existing session is ALREADY online in the same active visit
     if (existing && existing.is_online && existing.created_at) {
@@ -577,9 +581,13 @@ class GranularStore {
                 const text = await parseStorageData(data);
                 if (text) {
                   const s: StoreVisitorSession = JSON.parse(text);
-                  this.sessionCache.set(s.id, s);
-                  if (f.updated_at) {
-                    this.sessionFileTimestamps.set(id, f.updated_at);
+                  if (s.property_slug === 'teals-crm' || s.property_slug === 'salesflow-ai-main' || !s.property_slug) {
+                    supabaseAdmin.storage.from(BUCKET).remove([`sessions/${f.name}`]).catch(() => {});
+                  } else {
+                    this.sessionCache.set(s.id, s);
+                    if (f.updated_at) {
+                      this.sessionFileTimestamps.set(id, f.updated_at);
+                    }
                   }
                 }
               }
@@ -619,7 +627,14 @@ class GranularStore {
       return (now - lastActive) < 45 * 1000;
     };
 
-    const allSessions = Array.from(this.sessionCache.values());
+    // Exclude any internal Teals CRM sessions from visitor monitoring
+    const allSessions = Array.from(this.sessionCache.values()).filter(s => {
+      const p = (s.property_slug || '').toLowerCase().trim();
+      const page = (s.current_page || '').toLowerCase();
+      if (p === 'teals-crm' || p === 'salesflow-ai-main' || p === 'localhost') return false;
+      if (page.includes('salesflow-ai-main.vercel.app') || page.includes('teals-livechat-saas.vercel.app')) return false;
+      return true;
+    });
     const allConvs = Array.from(this.convCache.values());
 
     // Calculate total visit count per unique device (visitor_token / session id)

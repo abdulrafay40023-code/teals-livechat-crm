@@ -41,13 +41,12 @@ export async function POST(req: NextRequest) {
     }
 
     const refererHeader = req.headers.get('referer');
-    let effectiveSlug = (propertySlug && propertySlug !== 'teals-crm')
+    let effectiveSlug = (propertySlug && propertySlug !== 'teals-crm' && propertySlug !== 'salesflow-ai-main')
       ? propertySlug
       : detectWebsiteSlugFromUrl(currentPage || refererHeader);
-    if (!effectiveSlug) effectiveSlug = 'teals-crm';
 
-    // Only ignore internal CRM dashboard/management navigation so agents browsing the console are not tracked as visitors.
-    // Demo pages (/demo, /demo/*), widget embeds, and client websites MUST be tracked as visitors!
+    // Strictly ignore Teals CRM internal browsing and non-client properties:
+    // Only real client websites (amz-solutions-hub, amz-innovators, authors-breeze, pro-book-publishing, amz-writers-hub) or client demo pages are tracked.
     const isCrmDashboardRoute = (urlOrPath?: string | null): boolean => {
       if (!urlOrPath) return false;
       try {
@@ -70,14 +69,21 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // ONLY ignore internal CRM dashboard/management navigation.
-    // Demo pages (/demo), external widget embeds, and client websites MUST be tracked as visitors!
-    // NEVER ignore based on refererHeader (a visitor clicking a link or demo from CRM is still a visitor)!
-    if (isCrmDashboardRoute(currentPage)) {
+    const isCrmInternalTraffic = (
+      !effectiveSlug ||
+      effectiveSlug === 'teals-crm' ||
+      effectiveSlug === 'salesflow-ai-main' ||
+      propertySlug === 'teals-crm' ||
+      propertySlug === 'salesflow-ai-main' ||
+      (currentPage === '/' && (!refererHeader || refererHeader.includes('teals-livechat-saas.vercel.app') || refererHeader.includes('salesflow-ai-main.vercel.app'))) ||
+      isCrmDashboardRoute(currentPage)
+    );
+
+    if (isCrmInternalTraffic) {
       return NextResponse.json({
         success: true,
         tracked: false,
-        message: 'CRM dashboard traffic ignored'
+        message: 'Teals CRM internal traffic is not tracked'
       });
     }
 

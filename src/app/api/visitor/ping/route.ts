@@ -19,8 +19,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { sessionId, visitorToken, currentPage, isNewPageView, propertySlug = 'teals-crm', sessionStartTime, pageTitle } = body;
 
-    if (!sessionId) {
-      return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 });
+    if (!sessionId || propertySlug === 'teals-crm' || propertySlug === 'salesflow-ai-main') {
+      return NextResponse.json({ success: true, isOnline: false, tracked: false });
     }
 
     let ip =
