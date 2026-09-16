@@ -31,6 +31,12 @@ export default function LoginPage() {
 
   // Check if already authenticated or pending
   useEffect(() => {
+    // If opened directly outside CRM iframe, redirect to CRM
+    if (typeof window !== 'undefined' && window.self === window.top) {
+      window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
+      return;
+    }
+
     // Check pending state in localStorage
     const cachedPending = typeof window !== 'undefined' ? localStorage.getItem('teals_pending_agent') : null;
     let pendingCandidate: { full_name: string; email: string; phone: string } | null = null;

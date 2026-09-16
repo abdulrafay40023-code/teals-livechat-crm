@@ -94,6 +94,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       let resolvedAgent: any = null;
 
       if (typeof window !== 'undefined') {
+        // Enforce CRM embed: if opened standalone in top window, redirect to CRM
+        if (window.self === window.top) {
+          window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
+          return;
+        }
+
         const urlParams = new URLSearchParams(window.location.search);
         const ssoEmail = urlParams.get('sso_email');
         const ssoName = urlParams.get('sso_name');
