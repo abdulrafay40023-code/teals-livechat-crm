@@ -8,7 +8,8 @@ export const REALTIME_CHANNEL = 'teals-live-crm-stream';
 let activeBroadcastChannel: ReturnType<typeof supabase.channel> | null = null;
 
 export async function broadcastRealtimeEvent(event: string, payload: unknown): Promise<void> {
-  // 1. Instant WebSocket broadcast via live Supabase channel
+  // Single-dispatch: Send exactly once via WebSocket channel, or fallback to REST if unavailable
+  let sentViaWs = false;
   try {
     if (!activeBroadcastChannel) {
       activeBroadcastChannel = supabase.channel(REALTIME_CHANNEL, {
@@ -16,30 +17,35 @@ export async function broadcastRealtimeEvent(event: string, payload: unknown): P
       });
       await activeBroadcastChannel.subscribe();
     }
-    await activeBroadcastChannel.send({
+    const res = await activeBroadcastChannel.send({
       type: 'broadcast',
       event,
       payload
     });
+    if (res === 'ok') {
+      sentViaWs = true;
+    }
   } catch (err) {
     console.error('Supabase WS broadcast error:', err);
   }
 
-  // 2. Dual-dispatch via REST API as fallback
-  try {
-    await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
-      method: 'POST',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messages: [
-          { topic: REALTIME_CHANNEL, event, payload },
-          { topic: `realtime:${REALTIME_CHANNEL}`, event, payload }
-        ]
-      })
-    });
-  } catch {}
+  // Fallback to REST API ONLY if WebSocket send did not succeed
+  if (!sentViaWs) {
+    try {
+      await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: [
+            { topic: `realtime:${REALTIME_CHANNEL}`, event, payload },
+            { topic: REALTIME_CHANNEL, event, payload }
+          ]
+        })
+      });
+    } catch {}
+  }
 }

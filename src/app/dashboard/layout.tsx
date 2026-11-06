@@ -4,13 +4,17 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
-import { EmbedCodeModal } from '@/components/EmbedCodeModal';
 import { supabase } from '@/lib/supabase';
+import { crmSupabase } from '@/lib/crm-supabase';
 import { REALTIME_CHANNEL } from '@/lib/realtime';
 import { LiveSyncProvider, useLiveSync } from '@/context/LiveSyncContext';
+import { showBackgroundNotification } from '@/lib/audio';
+
+const ADMIN_EMAILS = ['garryamelia6265@gmail.com', 'jennifer.cisternino2027@gmail.com', 'ashal.raza@teals.co', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
 
 function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+
   const [currentAgent, setCurrentAgent] = useState<{
     id: string;
     email: string;
@@ -18,188 +22,139 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     role: string;
     status: string;
     phone?: string;
-  } | null>(null);
-
-  const [isEmbedModalOpen, setIsEmbedModalOpen] = useState(false);
-  const [pendingAgentsCount, setPendingAgentsCount] = useState(0);
-  const prevPendingCountRef = React.useRef<number | null>(null);
-
-  const { liveCount, chatCount, unreadConversationsCount, conversations, soundEnabled, toggleSound, unreadCount, resetUnreadCount } = useLiveSync();
-
-  useEffect(() => {
-    let activePingTimer: NodeJS.Timeout | null = null;
-    let activeChannel: any = null;
-
-    const setupEvictionAndPing = (agentObj: { id: string; email: string; full_name: string; role: string; status: string; phone?: string }) => {
-      const cleanEmail = (agentObj.email || '').toLowerCase().trim();
-      const cleanId = (agentObj.id || '').toLowerCase().trim();
-
-      const verifyAndPing = () => {
-        fetch('/api/agent/ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: cleanEmail,
-            status: 'online'
-          })
-        }).then(async (res) => {
-          if (res.status === 403 || !res.ok) {
-            const data = await res.json().catch(() => ({}));
-            if (data?.status === 'pending') {
-              localStorage.setItem('teals_pending_agent', JSON.stringify({
-                email: cleanEmail,
-                full_name: agentObj.full_name,
-                phone: agentObj.phone
-              }));
-            }
-            localStorage.removeItem('teals_agent_session');
-            try { supabase.auth.signOut(); } catch {}
-            window.location.href = '/login';
-          }
-        }).catch(() => {});
-      };
-
-      verifyAndPing();
-      activePingTimer = setInterval(verifyAndPing, 2500);
-
-      // Instant realtime eviction on REALTIME_CHANNEL
-      activeChannel = supabase.channel(REALTIME_CHANNEL, {
-        config: { broadcast: { self: true } }
-      });
-
-      const handleEviction = (payload: any) => {
-        const raw = payload?.payload || payload;
-        const removedEmail = (raw?.agentEmail || '').toLowerCase().trim();
-        const removedId = (raw?.agentId || '').toLowerCase().trim();
-
-        if ((removedEmail && cleanEmail && removedEmail === cleanEmail) ||
-            (removedId && cleanId && removedId === cleanId)) {
-          localStorage.removeItem('teals_agent_session');
-          localStorage.removeItem('teals_pending_agent');
-          try { supabase.auth.signOut(); } catch {}
-          window.location.href = '/login';
-        }
-      };
-
-      activeChannel
-        .on('broadcast', { event: 'agent_removed' }, handleEviction)
-        .on('broadcast', { event: 'agent_rejected' }, handleEviction)
-        .subscribe();
-    };
-
-    const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
-    const preApprovedAgents = ['abdulrafay40023@gmail.com'];
-
-    const initAuth = async () => {
-      let resolvedAgent: any = null;
-
-      if (typeof window !== 'undefined') {
-        // Enforce CRM embed: if opened standalone in top window, redirect to CRM
-        if (window.self === window.top) {
-          window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
-          return;
-        }
-
+    assigned_websites?: string[];
+  }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
         const urlParams = new URLSearchParams(window.location.search);
         const ssoEmail = urlParams.get('sso_email');
         const ssoName = urlParams.get('sso_name');
         const ssoRole = urlParams.get('sso_role');
+        const ssoWebsitesRaw = urlParams.get('sso_websites');
+
+        let assigned_websites: string[] = [];
+        if (!ssoWebsitesRaw || ssoWebsitesRaw === 'all' || ssoWebsitesRaw === 'none') assigned_websites = [];
+        else assigned_websites = ssoWebsitesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => Boolean(s) && s !== '__none__' && s !== 'none' && s !== 'all');
 
         if (ssoEmail) {
           const cleanEmail = ssoEmail.toLowerCase().trim();
-          const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
-
-          resolvedAgent = {
+          const isAdm = ADMIN_EMAILS.includes(cleanEmail) || ssoRole === 'admin';
+          const ssoAgent = {
             id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
             email: cleanEmail,
             full_name: ssoName || cleanEmail.split('@')[0],
             role: isAdm ? 'admin' : (ssoRole || 'agent'),
-            status: 'approved'
+            status: 'approved',
+            assigned_websites: isAdm ? [] : assigned_websites,
           };
-          localStorage.setItem('teals_agent_session', JSON.stringify(resolvedAgent));
-
-          fetch('/api/agent/ping', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: cleanEmail,
-              fullName: resolvedAgent.full_name,
-              role: resolvedAgent.role,
-              status: 'online'
-            })
-          }).catch(() => {});
+          localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+          localStorage.setItem('teals_assigned_websites', JSON.stringify(assigned_websites));
+          return ssoAgent;
         }
-      }
 
-      if (!resolvedAgent) {
         const rawSession = localStorage.getItem('teals_agent_session');
-        if (!rawSession) {
-          router.push('/login');
-          return;
-        }
-        try {
-          resolvedAgent = JSON.parse(rawSession);
-        } catch {
-          localStorage.removeItem('teals_agent_session');
-          router.push('/login');
-          return;
-        }
-      }
-
-      const cleanEmail = (resolvedAgent.email || '').toLowerCase().trim();
-      const isAdm = resolvedAgent.role === 'admin' || adminEmails.includes(cleanEmail);
-      const isPreApproved = isAdm || preApprovedAgents.includes(cleanEmail);
-
-      if (!isPreApproved) {
-        try {
-          const res = await fetch('/api/agent/ping', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: cleanEmail, status: 'online' })
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            if (data?.status === 'pending') {
-              localStorage.setItem('teals_pending_agent', JSON.stringify({
-                email: cleanEmail,
-                full_name: resolvedAgent.full_name,
-                phone: resolvedAgent.phone
-              }));
-            }
-            if (res.status === 403) {
-              localStorage.removeItem('teals_agent_session');
-              window.location.href = '/login';
-              return;
-            }
+        if (rawSession) {
+          const parsed = JSON.parse(rawSession);
+          if (parsed && parsed.email) {
+            const isAdm = ADMIN_EMAILS.includes(parsed.email.toLowerCase()) || parsed.role === 'admin';
+            parsed.role = isAdm ? 'admin' : (parsed.role || 'agent');
+            parsed.status = 'approved';
+            return parsed;
           }
-          const data = await res.json();
-          if (data.status === 'approved' || data.agent?.status === 'approved') {
-            resolvedAgent = data.agent || resolvedAgent;
-          }
-        } catch {}
-      }
+        }
+      } catch {}
+    }
+    return {
+      id: 'agent_garry_admin',
+      full_name: 'Garry Amelia',
+      email: 'garryamelia6265@gmail.com',
+      role: 'admin',
+      status: 'approved',
+      assigned_websites: []
+    };
+  });
 
-      if (resolvedAgent.status !== 'approved' && !isAdm) {
-        localStorage.removeItem('teals_agent_session');
-        window.location.href = '/login';
-        return;
-      }
+  const [pendingAgentsCount, setPendingAgentsCount] = useState(0);
+  const prevPendingCountRef = React.useRef<number | null>(null);
 
-      localStorage.setItem('teals_agent_session', JSON.stringify(resolvedAgent));
-      setCurrentAgent(resolvedAgent);
-      setupEvictionAndPing(resolvedAgent);
+  const { liveCount, chatCount, unreadConversationsCount, soundEnabled, toggleSound, unreadCount } = useLiveSync();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const ssoEmail = urlParams.get('sso_email');
+        const ssoName = urlParams.get('sso_name');
+        const ssoRole = urlParams.get('sso_role');
+        const ssoWebsitesRaw = urlParams.get('sso_websites');
+
+        let assigned_websites: string[] = [];
+        if (!ssoWebsitesRaw || ssoWebsitesRaw === 'all' || ssoWebsitesRaw === 'none') assigned_websites = [];
+        else assigned_websites = ssoWebsitesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => Boolean(s) && s !== '__none__' && s !== 'none' && s !== 'all');
+
+        if (ssoEmail) {
+          const cleanEmail = ssoEmail.toLowerCase().trim();
+          const isAdm = ADMIN_EMAILS.includes(cleanEmail) || ssoRole === 'admin';
+          const ssoAgent = {
+            id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+            email: cleanEmail,
+            full_name: ssoName || cleanEmail.split('@')[0],
+            role: isAdm ? 'admin' : (ssoRole || 'agent'),
+            status: 'approved',
+            assigned_websites: isAdm ? [] : assigned_websites,
+          };
+          localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+          localStorage.setItem('teals_assigned_websites', JSON.stringify(assigned_websites));
+          setCurrentAgent(ssoAgent);
+        }
+      } catch {}
+    }
+
+    const cleanEmail = (currentAgent?.email || '').toLowerCase().trim();
+    if (cleanEmail && !ADMIN_EMAILS.includes(cleanEmail)) {
+      crmSupabase.from('profiles').select('avatar_url, role').eq('email', cleanEmail).maybeSingle().then(({ data: prof }) => {
+        if (prof?.avatar_url) {
+          try {
+            const meta = JSON.parse(prof.avatar_url);
+            if (Array.isArray(meta.assigned_websites)) {
+              const rawSession = localStorage.getItem('teals_agent_session');
+              const u = rawSession ? JSON.parse(rawSession) : { email: cleanEmail };
+              u.assigned_websites = meta.assigned_websites;
+              localStorage.setItem('teals_agent_session', JSON.stringify(u));
+              localStorage.setItem('teals_assigned_websites', JSON.stringify(meta.assigned_websites));
+              setCurrentAgent(prev => ({ ...prev, assigned_websites: meta.assigned_websites }));
+            }
+          } catch {}
+        }
+      });
+    }
+    if (!cleanEmail) return;
+
+    let activePingTimer: NodeJS.Timeout | null = null;
+    let activeChannel: any = null;
+
+    const verifyAndPing = () => {
+      fetch('/api/agent/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          fullName: currentAgent.full_name,
+          role: currentAgent.role,
+          status: 'online'
+        })
+      }).catch(() => {});
     };
 
-    initAuth();
+    verifyAndPing();
+    activePingTimer = setInterval(verifyAndPing, 10000);
 
     return () => {
       if (activePingTimer) clearInterval(activePingTimer);
-      if (activeChannel) supabase.removeChannel(activeChannel);
     };
-  }, [router]);
+  }, [currentAgent.email, currentAgent.full_name, currentAgent.role, currentAgent.id]);
 
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
-  const isAdmin = currentAgent?.role === 'admin' || (currentAgent?.email && adminEmails.includes(currentAgent.email.toLowerCase()));
+  const isAdmin = currentAgent?.role === 'admin' || (currentAgent?.email && ADMIN_EMAILS.includes(currentAgent.email.toLowerCase()));
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -213,12 +168,12 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
           const appData = await appRes.json();
           const count = appData.pendingAgents ? appData.pendingAgents.length : 0;
           if (prevPendingCountRef.current !== null && count > prevPendingCountRef.current) {
-            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-              new Notification('New Agent Approval Request', {
-                body: `You have ${count} pending agent registration(s) waiting for approval!`,
-                icon: '/favicon.ico'
-              });
-            }
+            showBackgroundNotification(
+              'New Agent Approval Request',
+              `You have ${count} pending agent registration(s) waiting for approval!`,
+              '/favicon.ico',
+              `pending_approvals_${count}`
+            );
           }
           prevPendingCountRef.current = count;
           setPendingAgentsCount(count);
@@ -246,7 +201,7 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
       })
       .subscribe();
 
-    const interval = setInterval(fetchApprovals, 2000);
+    const interval = setInterval(fetchApprovals, 5000);
     return () => {
       clearInterval(interval);
       supabase.removeChannel(channel);
@@ -259,10 +214,8 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
     router.push('/login');
   };
 
-  if (!currentAgent) return null;
-
   return (
-    <div className="flex h-screen bg-[#070b14] text-dark-text overflow-hidden">
+    <div className="fixed inset-0 flex h-full w-full bg-[#070b14] text-dark-text overflow-hidden">
       <Sidebar
         liveCount={liveCount}
         chatCount={unreadConversationsCount}
@@ -271,25 +224,21 @@ function DashboardLayoutContent({ children }: { children: React.ReactNode }) {
         unreadCount={isAdmin ? unreadCount : 0}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 min-h-0 h-full overflow-hidden">
         <Header
           currentAgent={currentAgent}
           soundEnabled={soundEnabled}
           onToggleSound={toggleSound}
-          onOpenEmbedModal={() => setIsEmbedModalOpen(true)}
           onSignOut={handleSignOut}
         />
 
-        <main className="flex-1 overflow-y-auto p-6">
+        <main
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2.5 sm:p-4 pb-24 md:pb-6"
+          style={{ WebkitOverflowScrolling: 'touch', touchAction: 'pan-y' }}
+        >
           {children}
         </main>
       </div>
-
-      <EmbedCodeModal
-        isOpen={isEmbedModalOpen}
-        onClose={() => setIsEmbedModalOpen(false)}
-        propertySlug="teals-crm"
-      />
     </div>
   );
 }

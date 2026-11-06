@@ -7,6 +7,7 @@ import {
   Phone, Mail, ArrowRight, User, History, Sparkles
 } from 'lucide-react';
 import { getAllWebsites, WEBSITES, getWebsiteConfig } from '@/lib/websites-config';
+import { useLiveSync } from '@/context/LiveSyncContext';
 
 interface SavedMessage {
   id: string;
@@ -36,14 +37,16 @@ interface SavedConversation {
 }
 
 export default function AllChatsSavePage() {
+  const { websites: contextWebsites, isWebsitePermitted } = useLiveSync();
   const [conversations, setConversations] = useState<SavedConversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [selectedWebsite, setSelectedWebsite] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
+  const [mobileColumnTab, setMobileColumnTab] = useState<'chat1' | 'chat2'>('chat1');
 
-  const websites = getAllWebsites();
+  const websites = (contextWebsites && contextWebsites.length > 0 ? contextWebsites : getAllWebsites()).filter(w => isWebsitePermitted(w.slug));
   const supabaseBucketUrl = 'https://supabase.com/dashboard/project/nyoegrnemmravwqdcqnp/storage/buckets/teals-live-store';
 
   const fetchSavedChats = async () => {
@@ -72,6 +75,9 @@ export default function AllChatsSavePage() {
   // Filter conversations
   const filteredConversations = useMemo(() => {
     return conversations.filter(c => {
+      // 0. Agent website permission filter
+      if (!isWebsitePermitted(c.property_slug || 'amz-solutions-hub')) return false;
+
       // 1. Website filter
       if (selectedWebsite !== 'all') {
         const p = (c.property_slug || '').toLowerCase();
@@ -383,14 +389,14 @@ export default function AllChatsSavePage() {
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
       {/* Top Banner */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#0e1628] border border-dark-border/80 rounded-2xl p-5 shadow-xl">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#0e1628] border border-dark-border/80 rounded-2xl p-4 sm:p-5 shadow-xl">
         <div className="space-y-1">
           <div className="flex items-center space-x-2.5">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400">
+            <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
               <Archive className="w-5 h-5" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white tracking-tight flex items-center space-x-2">
+              <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight flex flex-wrap items-center gap-2">
                 <span>All Chats Save Page</span>
                 <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-brand-emerald/15 text-brand-emerald border border-brand-emerald/30 flex items-center space-x-1">
                   <CheckCircle2 className="w-3 h-3" />
@@ -398,14 +404,14 @@ export default function AllChatsSavePage() {
                 </span>
               </h1>
               <p className="text-xs text-dark-muted">
-                Permanent day-by-day record with separate <strong>Chat 1 (Old)</strong> and <strong>Chat 2 (New)</strong> columns across all 5 websites
+                Permanent day-by-day record with separate <strong>Chat 1 (Old)</strong> and <strong>Chat 2 (New)</strong> columns across all websites
               </p>
             </div>
           </div>
         </div>
 
         {/* Supabase Storage Cloud Info & Refresh */}
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <a
             href={supabaseBucketUrl}
             target="_blank"
@@ -473,14 +479,42 @@ export default function AllChatsSavePage() {
         </div>
       </div>
 
+      {/* Mobile Tab Toggle for Chat 1 vs Chat 2 (Visible only on mobile < sm) */}
+      <div className="grid grid-cols-2 gap-2 sm:hidden bg-dark-card/90 border border-dark-border rounded-2xl p-1.5">
+        <button
+          type="button"
+          onClick={() => setMobileColumnTab('chat1')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+            mobileColumnTab === 'chat1'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'text-dark-muted hover:text-white'
+          }`}
+        >
+          <History className="w-3.5 h-3.5" />
+          <span>Chat 1 ({chat1List.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileColumnTab('chat2')}
+          className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+            mobileColumnTab === 'chat2'
+              ? 'bg-purple-600 text-white shadow-md'
+              : 'text-dark-muted hover:text-white'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Chat 2 ({chat2List.length})</span>
+        </button>
+      </div>
+
       {/* Main Layout: 2 Columns for (Chat 1 Old & Chat 2 New) + Transcript Viewer */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[620px]">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[500px] lg:min-h-[620px]">
         
         {/* Left Area: 2 Columns Side-by-Side (7 cols) */}
         <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
           
           {/* COLUMN 1: Chat 1 (Old / Initial Inquiries) */}
-          <div className="bg-dark-card border border-dark-border rounded-2xl p-4 flex flex-col h-[650px] shadow-xl">
+          <div className={`${mobileColumnTab === 'chat1' ? 'flex' : 'hidden sm:flex'} bg-dark-card border border-dark-border rounded-2xl p-4 flex-col h-[420px] sm:h-[650px] shadow-xl`}>
             <div className="flex items-center justify-between pb-3 border-b border-dark-border text-xs">
               <div className="flex items-center space-x-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse" />
@@ -530,7 +564,7 @@ export default function AllChatsSavePage() {
           </div>
 
           {/* COLUMN 2: Chat 2 (New / Follow-up / Returning Inquiries) */}
-          <div className="bg-dark-card border border-dark-border rounded-2xl p-4 flex flex-col h-[650px] shadow-xl">
+          <div className={`${mobileColumnTab === 'chat2' ? 'flex' : 'hidden sm:flex'} bg-dark-card border border-dark-border rounded-2xl p-4 flex-col h-[420px] sm:h-[650px] shadow-xl`}>
             <div className="flex items-center justify-between pb-3 border-b border-dark-border text-xs">
               <div className="flex items-center space-x-2">
                 <div className="w-2.5 h-2.5 rounded-full bg-purple-500 animate-pulse" />
@@ -582,7 +616,7 @@ export default function AllChatsSavePage() {
         </div>
 
         {/* Right Column: Full Conversation Transcript Viewer (5 cols) */}
-        <div className="lg:col-span-5 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[650px] shadow-xl overflow-hidden">
+        <div className="lg:col-span-5 bg-dark-card border border-dark-border rounded-2xl flex flex-col h-[500px] sm:h-[650px] shadow-xl overflow-hidden">
           {selectedConversation ? (
             <>
               {/* Transcript Header */}

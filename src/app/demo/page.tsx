@@ -1,22 +1,35 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Sparkles, Users, Mail, Calendar, CheckCircle2, TrendingUp, Bell, RefreshCw, ExternalLink } from 'lucide-react';
 import { WidgetChat } from '@/components/WidgetChat';
+import { getWebsiteConfig } from '@/lib/websites-config';
 
 export default function DemoPage() {
+  const [propertySlug, setPropertySlug] = useState<string>('teals-crm');
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const prop = params.get('property');
+      if (prop) setPropertySlug(prop);
+    } catch {}
+  }, []);
+
+  const siteCfg = getWebsiteConfig(propertySlug);
+
   return (
     <div className="min-h-screen bg-dark-bg text-dark-text relative">
       {/* Teals CRM Header Mockup */}
       <header className="h-16 border-b border-dark-border bg-dark-surface/80 px-6 flex items-center justify-between">
         <div className="flex items-center space-x-3">
           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-brand-primary to-brand-secondary flex items-center justify-center text-white font-bold">
-            T
+            {(siteCfg.name || 'T').charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="text-sm font-bold text-dark-text">Teals CRM</h1>
-            <p className="text-[10px] text-dark-muted">AI Sales Suite (Live Demo Site)</p>
+            <h1 className="text-sm font-bold text-dark-text">{siteCfg.name}</h1>
+            <p className="text-[10px] text-dark-muted">{siteCfg.domain} (Live Widget Demo Preview)</p>
           </div>
         </div>
 
@@ -37,7 +50,7 @@ export default function DemoPage() {
         <div>
           <div className="flex items-center space-x-2 text-xs text-brand-emerald mb-1">
             <span className="w-2 h-2 rounded-full bg-brand-emerald animate-ping" />
-            <span>Live • Connected to LiveChat Hub</span>
+            <span>Live • Connected to LiveChat Hub ({siteCfg.name})</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black text-dark-text">
             Good afternoon, Garry
@@ -85,17 +98,18 @@ export default function DemoPage() {
         <div className="bg-dark-card/90 border border-brand-primary/30 rounded-2xl p-6 shadow-xl space-y-3">
           <div className="flex items-center space-x-2 text-brand-secondary font-bold text-sm">
             <Sparkles className="w-5 h-5" />
-            <span>Interactive LiveChat Widget Simulation</span>
+            <span>Interactive LiveChat Widget Simulation ({siteCfg.name})</span>
           </div>
           <p className="text-xs text-dark-muted leading-relaxed">
-            By visiting this page, your session is already tracked on the <strong className="text-dark-text">Agent Dashboard</strong>. 
+            By visiting this page, your session is already tracked on the <strong className="text-dark-text">Agent Dashboard</strong> under <strong className="text-dark-text">{siteCfg.name}</strong>. 
             Click the circular chat launcher at the bottom-right to test Gemini AI auto-replies, request human assistance, or watch real-time typing sneak peek!
           </p>
         </div>
       </main>
 
       {/* Floating Embedded LiveChat Widget */}
-      <WidgetChat propertySlug="teals-crm" />
+      <WidgetChat propertySlug={propertySlug} />
     </div>
   );
 }
+

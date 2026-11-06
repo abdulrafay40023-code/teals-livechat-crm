@@ -22,6 +22,7 @@ export async function POST(request: Request) {
 
       return NextResponse.json({
         success: true,
+        resetAt,
         message: 'All conversations have been reset.'
       });
     }
@@ -32,14 +33,17 @@ export async function POST(request: Request) {
     // Clear all active conversations and cloud storage
     await granularStore.clearAllConversations();
 
+    const resetAt = granularStore.getLastResetAt();
+
     // Broadcast stats reset & complete system wipe to all client browsers
     await Promise.all([
-      broadcastRealtimeEvent('stats_reset', {}),
-      broadcastRealtimeEvent('system_reset', {})
+      broadcastRealtimeEvent('stats_reset', { resetAt }),
+      broadcastRealtimeEvent('system_reset', { resetAt })
     ]);
 
     return NextResponse.json({
       success: true,
+      resetAt,
       message: 'All live traffic, visitors, conversations, and badges reset to 0.'
     });
   } catch (err: unknown) {

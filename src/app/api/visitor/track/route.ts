@@ -3,7 +3,10 @@ import { granularStore, StoreVisitorSession, StoreMessage, isStaffOrAdmin, isSta
 import { lookupGeoAsync } from '@/lib/geo';
 import { parseUserAgent } from '@/lib/device';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { dispatchWebPushForRealtimeEvent } from '@/lib/web-push';
 import { detectWebsiteSlugFromUrl } from '@/lib/websites-config';
+
+const serverArrivalBroadcastMap = new Map<string, number>();
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -28,22 +31,16 @@ export async function POST(req: NextRequest) {
       isNewPageView = false,
       isFirstVisit = false,
       visitorName,
-      visitorEmail
+      visitorEmail,
+      visitorPhone
     } = body;
 
-    // Strict block: Agents and Admins cannot enter/chat as a client/visitor
-    if (await isStaffOrAdminAsync(visitorEmail, visitorName)) {
-      return NextResponse.json({
-        success: false,
-        error: 'Agents and Admins cannot initiate chats as clients. Aapko as a client aana hoga.',
-        isStaffBlocked: true
-      }, { status: 403 });
-    }
+    // Allow all visitors and testing sessions to be tracked
 
     const refererHeader = req.headers.get('referer');
     let effectiveSlug = (propertySlug && propertySlug !== 'teals-crm' && propertySlug !== 'salesflow-ai-main')
       ? propertySlug
-      : detectWebsiteSlugFromUrl(currentPage || refererHeader);
+      : detectWebsiteSlugFromUrl(body.fullUrl || currentPage || refererHeader);
 
     // Strictly ignore Teals CRM internal browsing and non-client properties:
     // Only real client websites (amz-solutions-hub, amz-innovators, authors-breeze, pro-book-publishing, amz-writers-hub) or client demo pages are tracked.
@@ -69,22 +66,16 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    const isCrmInternalTraffic = (
-      !effectiveSlug ||
-      effectiveSlug === 'teals-crm' ||
-      effectiveSlug === 'salesflow-ai-main' ||
-      propertySlug === 'teals-crm' ||
-      propertySlug === 'salesflow-ai-main' ||
-      (currentPage === '/' && (!refererHeader || refererHeader.includes('teals-livechat-saas.vercel.app') || refererHeader.includes('salesflow-ai-main.vercel.app'))) ||
-      isCrmDashboardRoute(currentPage)
-    );
-
-    if (isCrmInternalTraffic) {
+    if (isCrmDashboardRoute(currentPage) || propertySlug === 'salesflow-ai-main') {
       return NextResponse.json({
         success: true,
         tracked: false,
         message: 'Teals CRM internal traffic is not tracked'
       });
+    }
+
+    if (!effectiveSlug || effectiveSlug === 'teals-crm' || effectiveSlug === 'salesflow-ai-main') {
+      effectiveSlug = 'amz-solutions-hub';
     }
 
     const sid = sessionId || ('tab_' + Math.random().toString(36).substring(2, 10));
@@ -106,9 +97,9 @@ export async function POST(req: NextRequest) {
     ip = ip.trim();
 
     if (!ip || ip === '::1' || ip === '127.0.0.1') {
-      ip = req.headers.get('x-forwarded-for') || '182.188.238.155';
-      if (ip.includes(',')) ip = ip.split(',')[0].trim();
-      if (ip === '::1' || ip === '127.0.0.1') ip = '182.188.238.155';
+      const rawXForwarded = req.headers.get('x-forwarded-for') || '';
+      ip = rawXForwarded.includes(',') ? rawXForwarded.split(',')[0].trim() : rawXForwarded.trim();
+      if (ip === '::1' || ip === '127.0.0.1') ip = '';
     }
 
     // 2. Extract edge geolocation hints provided directly by Vercel Edge / Cloudflare
@@ -160,17 +151,25 @@ export async function POST(req: NextRequest) {
     // Save session in memory (cloud upload is backgrounded)
     await granularStore.saveSession(session);
 
-    // Broadcast instant arrival ONLY for genuine visits or new page views, NEVER for passive background pings/re-syncs
-    const shouldBroadcastArrival = isFirstVisit || isNewPageView || !existingSession;
-    if (shouldBroadcastArrival) {
-      broadcastRealtimeEvent('visitor_arrival', {
+    // Server-Side Strict Arrival Broadcast Throttling & Idempotency:
+    // Only broadcast visitor_arrival for genuine new page arrivals, NEVER on widget opens, form submits, or pings
+    const ipKey = (ip && ip !== '::1' && ip !== '127.0.0.1' && ip !== 'localhost') ? ip : (sid || token);
+    const broadcastKey = `${effectiveSlug}___${ipKey}`;
+    const lastBroadcastTime = serverArrivalBroadcastMap.get(broadcastKey) || 0;
+    const nowMs = Date.now();
+
+    if ((nowMs - lastBroadcastTime > 45000) && (isFirstVisit || isNewPageView || !existingSession)) {
+      serverArrivalBroadcastMap.set(broadcastKey, nowMs);
+      const arrivalPayload = {
         session,
         propertySlug: effectiveSlug,
         isNew: true,
         visitorToken: token,
         sessionId: sid,
         currentPage
-      }).catch(() => {});
+      };
+      broadcastRealtimeEvent('visitor_arrival', arrivalPayload).catch(() => {});
+      dispatchWebPushForRealtimeEvent('visitor_arrival', arrivalPayload).catch(() => {});
     }
 
     let conv = await granularStore.getConversation(token);
@@ -182,6 +181,10 @@ export async function POST(req: NextRequest) {
       }
       if (visitorEmail && conv.visitor_email !== visitorEmail) {
         conv.visitor_email = visitorEmail;
+        changed = true;
+      }
+      if (visitorPhone && conv.visitor_phone !== visitorPhone) {
+        conv.visitor_phone = visitorPhone;
         changed = true;
       }
       if ((!conv.property_slug || conv.property_slug === 'teals-crm') && effectiveSlug && effectiveSlug !== 'teals-crm') {

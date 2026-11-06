@@ -3,6 +3,6 @@
 node_modules
 dist
 build
-
-.vercel
 .env*
+.vercel.abdulrafay.bak
+restore_full_chats.js

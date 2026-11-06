@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { granularStore, StoreMessage, StoreConversation, isStaffOrAdmin, isStaffOrAdminAsync } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
-import { isHumanHandoffRequested, generateAIChatResponse } from '@/lib/gemini';
+import { dispatchWebPushForRealtimeEvent } from '@/lib/web-push';
+import { isHumanHandoffRequested, generateAIChatResponse, sanitizeEmDashes } from '@/lib/gemini';
 import { getWebsiteConfig, detectWebsiteSlugFromUrl } from '@/lib/websites-config';
 
 export async function OPTIONS() {
@@ -28,27 +29,32 @@ export async function GET(req: NextRequest) {
     'Access-Control-Allow-Origin': '*'
   };
 
-  const serverResetAt = granularStore.getLastResetAt();
+  const serverResetAt = await granularStore.getLastResetAtAsync();
 
+  // 1. If conversationId is specified, ALWAYS return that exact conversation
+  if (conversationId) {
+    await granularStore.ensureStorageLoaded();
+    const isDeleted = granularStore.isConversationDeleted(conversationId);
+    const conv = await granularStore.getConversation(conversationId);
+    return NextResponse.json({
+      conversation: conv,
+      messages: conv?.messages || [],
+      isDeleted: Boolean(isDeleted || (!conv && granularStore.isConversationDeleted(conversationId))),
+      serverResetAt: granularStore.getLastResetAt() || serverResetAt
+    }, { headers });
+  }
+
+  // 2. Only if no conversationId was provided, query conversations list for visitor
   if (visitorToken || email) {
     const list = await granularStore.getConversationsByVisitor(visitorToken || '', email || undefined);
     return NextResponse.json({
       conversations: list,
       count: list.length,
-      serverResetAt
+      serverResetAt: granularStore.getLastResetAt() || serverResetAt
     }, { headers });
   }
 
-  if (!conversationId) {
-    return NextResponse.json({ error: 'Missing conversationId or visitorToken', serverResetAt }, { status: 400, headers });
-  }
-
-  const conv = await granularStore.getConversation(conversationId);
-  return NextResponse.json({
-    conversation: conv,
-    messages: conv?.messages || [],
-    serverResetAt
-  }, { headers });
+  return NextResponse.json({ error: 'Missing conversationId or visitorToken', serverResetAt }, { status: 400, headers });
 }
 
 export async function POST(req: NextRequest) {
@@ -63,11 +69,19 @@ export async function POST(req: NextRequest) {
       senderType,
       senderName,
       senderEmail,
+      senderPhone,
+      senderPseudoName,
+      senderRoleTitle,
+      assignedAgentName,
+      assignedAgentPseudoName,
+      assignedAgentRoleTitle,
       content,
       isWhisper = false,
       isHumanConnected = false,
-      assignedAgentName,
-      chatNumber
+      chatNumber,
+      is_form = false,
+      form_type,
+      form_data
     } = await req.json();
 
     if (!content || !senderType) {
@@ -82,7 +96,10 @@ export async function POST(req: NextRequest) {
       : detectWebsiteSlugFromUrl(pageUrl || refererHeader);
     const siteConfig = getWebsiteConfig(effectiveSlug);
 
-    const convId = conversationId || visitorToken || ('conv_' + Math.random().toString(36).substring(2, 9));
+    const hasExplicitConvId = Boolean(conversationId && !conversationId.startsWith('vis_'));
+    const convId = hasExplicitConvId 
+      ? conversationId! 
+      : (visitorToken && visitorToken.startsWith('conv_') ? visitorToken : ('conv_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36)));
 
     // Keep visitor session alive when they send a message (prevents live count drop)
     if (senderType === 'visitor' && visitorToken) {
@@ -96,11 +113,22 @@ export async function POST(req: NextRequest) {
       } catch {}
     }
     let conv = await granularStore.getConversation(convId);
+    // ONLY fall back to existing conversations if client DID NOT specify an explicit conversationId (or if conversationId was a visitor token)
+    if (!conv && !hasExplicitConvId && visitorToken) {
+      const existingConvs = await granularStore.getConversationsByVisitor(visitorToken, undefined);
+      if (existingConvs.length > 0) {
+        if (chatNumber === 2 || chatNumber === '2') {
+          conv = existingConvs.find((c: any) => c.chat_number === 2) || undefined;
+        } else {
+          conv = existingConvs.find((c: any) => c.chat_number !== 2) || existingConvs[0];
+        }
+      }
+    }
     const now = new Date().toISOString();
 
     // STRICT HUMAN CONVERSATION CHECK: If claimed, has agent, or agent ever replied, it is 100% HUMAN!
-    const hasAgentAssigned = !!(conv?.assigned_agent_id || conv?.assigned_agent_name || assignedAgentName);
-    const hasAgentMessages = (conv?.messages || []).some(m => m.sender_type === 'agent');
+    const hasAgentAssigned = !!(conv?.assigned_agent_id || conv?.assigned_agent_name || assignedAgentName || (senderType === 'agent'));
+    const hasAgentMessages = (conv?.messages || []).some(m => m.sender_type === 'agent') || (senderType === 'agent');
     const hasClaimSystemMsg = (conv?.messages || []).some(m => m.sender_type === 'system' && m.content.includes('claimed and joined'));
     const isHumanMode = conv?.mode === 'human' || isHumanConnected || hasAgentAssigned || hasAgentMessages || hasClaimSystemMsg;
 
@@ -108,13 +136,14 @@ export async function POST(req: NextRequest) {
 
     if (!conv) {
       isBrandNewConv = true;
-      let inheritedName = (senderName && senderName !== 'System' && senderName !== 'Visitor') ? senderName : '';
-      let inheritedEmail = (senderEmail && senderEmail.trim()) ? senderEmail.trim() : '';
+      let inheritedName = '';
+      let inheritedEmail = '';
+      let inheritedPhone = '';
 
-      // Strict 2-chat limit per visitor to prevent spam & abuse
+      // Strict 2-chat limit per visitor session to prevent spam & abuse
       let existingList: any[] = [];
-      if (senderEmail || visitorToken) {
-        existingList = await granularStore.getConversationsByVisitor(visitorToken || '', senderEmail || undefined);
+      if (visitorToken) {
+        existingList = await granularStore.getConversationsByVisitor(visitorToken, undefined);
         if (existingList.length >= 2) {
           return NextResponse.json({
             error: 'Maximum 2 conversations allowed per visitor.',
@@ -124,27 +153,42 @@ export async function POST(req: NextRequest) {
         }
         if (existingList.length > 0) {
           const prev = existingList[0];
-          if (!inheritedName && prev.visitor_name && prev.visitor_name !== 'Visitor' && prev.visitor_name !== 'System') {
+          if (prev.visitor_name && prev.visitor_name !== 'Visitor' && prev.visitor_name !== 'System' && prev.visitor_name !== 'Live Visitor') {
             inheritedName = prev.visitor_name;
           }
-          if (!inheritedEmail && prev.visitor_email) {
+          if (prev.visitor_email) {
             inheritedEmail = prev.visitor_email;
+          }
+          if (prev.visitor_phone) {
+            inheritedPhone = prev.visitor_phone;
           }
         }
       }
 
       const explicitChatNum = (chatNumber === 2 || chatNumber === '2') ? 2 : (chatNumber === 1 || chatNumber === '1') ? 1 : undefined;
+      const initialVisitorName = senderType === 'visitor' 
+        ? (senderName && senderName !== 'System' && senderName !== 'Visitor' ? senderName : (inheritedName || 'Visitor'))
+        : (inheritedName || 'Live Visitor');
+
+      const initialVisitorEmail = senderType === 'visitor' 
+        ? (senderEmail || inheritedEmail || undefined)
+        : (inheritedEmail || undefined);
+
+      const initialVisitorPhone = senderType === 'visitor'
+        ? (senderPhone || inheritedPhone || undefined)
+        : (inheritedPhone || undefined);
 
       conv = {
         id: convId,
         property_slug: effectiveSlug,
         visitor_id: visitorToken || convId,
-        visitor_name: inheritedName || (senderName && senderName !== 'System' ? senderName : undefined) || 'Visitor',
-        visitor_email: inheritedEmail || senderEmail || undefined,
-        chat_number: explicitChatNum || (existingList && existingList.length >= 1 ? 2 : 1),
+        visitor_name: initialVisitorName,
+        visitor_email: initialVisitorEmail,
+        visitor_phone: initialVisitorPhone,
+        chat_number: explicitChatNum || 1,
         mode: isHumanMode ? 'human' : 'ai',
         status: isHumanMode ? (hasAgentAssigned ? 'active' : 'pending_agent') : 'active',
-        assigned_agent_name: assignedAgentName || undefined,
+        assigned_agent_name: assignedAgentName || (senderType === 'agent' ? senderName : undefined),
         created_at: now,
         updated_at: now,
         messages: [
@@ -156,7 +200,7 @@ export async function POST(req: NextRequest) {
             content: 'Hey how can i help you ?',
             is_whisper: false,
             seq: 1,
-            created_at: '1970-01-01T00:00:00.000Z'
+            created_at: now
           }
         ]
       };
@@ -164,7 +208,9 @@ export async function POST(req: NextRequest) {
       if (chatNumber === 2 || chatNumber === '2') {
         (conv as any).chat_number = 2;
       } else if (chatNumber === 1 || chatNumber === '1') {
-        (conv as any).chat_number = 1;
+        if (!(conv as any).chat_number) {
+          (conv as any).chat_number = 1;
+        }
       }
       if (!conv.property_slug || conv.property_slug === 'teals-crm') {
         if (effectiveSlug && effectiveSlug !== 'teals-crm') {
@@ -177,9 +223,57 @@ export async function POST(req: NextRequest) {
         if (!conv.status) conv.status = hasAgentAssigned ? 'active' : 'pending_agent';
       }
       if (senderType === 'visitor') {
-        if (senderName && senderName !== 'Visitor' && senderName !== 'You') conv.visitor_name = senderName;
+        if (senderName && senderName !== 'Visitor' && senderName !== 'You' && senderName !== 'System') {
+          conv.visitor_name = senderName;
+        }
         if (senderEmail) conv.visitor_email = senderEmail;
+        if (senderPhone) conv.visitor_phone = senderPhone;
+      } else if (senderType === 'agent') {
+        if (assignedAgentName || senderName) {
+          conv.assigned_agent_name = assignedAgentName || senderName;
+        }
+        if (assignedAgentPseudoName || senderPseudoName) {
+          conv.assigned_agent_pseudo_name = assignedAgentPseudoName || senderPseudoName;
+        }
+        if (assignedAgentRoleTitle || senderRoleTitle) {
+          conv.assigned_agent_role_title = assignedAgentRoleTitle || senderRoleTitle;
+        }
+        if (!conv.visitor_name || conv.visitor_name === 'Garry Amelia' || conv.visitor_name === 'System') {
+          conv.visitor_name = 'Live Visitor';
+        }
       }
+    }
+
+    // Resolve client IP and bind visitor session info (IP, city, country, flag) strictly to conversation
+    let clientIp =
+      req.headers.get('cf-connecting-ip') ||
+      req.headers.get('x-real-ip') ||
+      req.headers.get('x-client-ip') ||
+      req.headers.get('x-forwarded-for') ||
+      req.headers.get('fastly-client-ip') ||
+      req.headers.get('true-client-ip') ||
+      '';
+    if (clientIp.includes(',')) clientIp = clientIp.split(',')[0].trim();
+    clientIp = clientIp.trim();
+    if (clientIp === '::1' || clientIp === '127.0.0.1') clientIp = '';
+
+    const session = conv.visitor || 
+      (visitorToken ? await granularStore.getSession(visitorToken) : null) ||
+      (conv.visitor_id ? await granularStore.getSession(conv.visitor_id) : null) ||
+      (conv.id ? await granularStore.getSession(conv.id) : null) ||
+      Array.from(granularStore.sessionCache.values()).find(s => 
+        (visitorToken && (s.visitor_token === visitorToken || s.id === visitorToken)) ||
+        (conv.visitor_id && (s.visitor_token === conv.visitor_id || s.id === conv.visitor_id)) ||
+        s.id === conv.id ||
+        s.visitor_token === conv.id ||
+        (clientIp && s.ip_address === clientIp)
+      );
+
+    if (session) {
+      conv.visitor = session;
+      conv.visitor_ip = session.ip_address;
+    } else if (clientIp && !conv.visitor_ip) {
+      conv.visitor_ip = clientIp;
     }
 
     const isFirstVisitorMsg = senderType === 'visitor' && (!conv.messages || conv.messages.filter(m => m.sender_type === 'visitor').length === 0);
@@ -190,10 +284,16 @@ export async function POST(req: NextRequest) {
       conversation_id: conv.id,
       sender_type: senderType,
       sender_name: senderName || (senderType === 'visitor' ? 'Visitor' : 'Agent'),
+      sender_pseudo_name: senderPseudoName || (senderType === 'agent' ? conv.assigned_agent_pseudo_name : undefined),
+      sender_role_title: senderRoleTitle || (senderType === 'agent' ? conv.assigned_agent_role_title : undefined),
+      sender_real_name: senderType === 'agent' ? (senderName || conv.assigned_agent_name) : undefined,
       content: content,
       is_whisper: isWhisper,
       seq: maxSeq + 1,
-      created_at: now
+      created_at: now,
+      is_form: Boolean(is_form),
+      form_type: form_type || undefined,
+      form_data: form_data || undefined
     };
 
     if (!conv.messages) conv.messages = [];
@@ -212,6 +312,9 @@ export async function POST(req: NextRequest) {
       console.log('[CHAT_DEBUG] Visitor explicitly requested human handoff:', content);
       conv.mode = 'human';
       conv.status = 'pending_agent';
+      conv.assigned_agent_id = undefined;
+      conv.assigned_agent_name = undefined;
+      conv.assigned_agent_email = undefined;
       conv.last_visitor_message_at = now;
 
       const handoffSystemMsg: StoreMessage = {
@@ -228,14 +331,16 @@ export async function POST(req: NextRequest) {
       conv.messages = conv.messages.filter(m => !(m.sender_type === 'system' && m.content.includes('Transferring to a live support agent')));
       conv.messages.push(handoffSystemMsg);
 
+      const handoffPayload = {
+        conversationId: conv.id,
+        message: newMsg,
+        systemMessage: handoffSystemMsg,
+        conversation: conv,
+        isHandoffRequested: true
+      };
       await Promise.all([
-        broadcastRealtimeEvent('chat_message', {
-          conversationId: conv.id,
-          message: newMsg,
-          systemMessage: handoffSystemMsg,
-          conversation: conv,
-          isHandoffRequested: true
-        }),
+        broadcastRealtimeEvent('chat_message', handoffPayload),
+        dispatchWebPushForRealtimeEvent('chat_message', handoffPayload),
         broadcastRealtimeEvent('new_conversation', {
           conversationId: conv.id,
           conversation: conv
@@ -258,14 +363,16 @@ export async function POST(req: NextRequest) {
     if (isStrictlyAi && senderType === 'visitor') {
       conv.last_visitor_message_at = now;
 
+      const aiVisitorPayload = {
+        conversationId: conv.id,
+        message: newMsg,
+        conversation: conv,
+        isHandoffRequested: false
+      };
       // 1. Broadcast visitor message instantly in parallel with storage
       await Promise.all([
-        broadcastRealtimeEvent('chat_message', {
-          conversationId: conv.id,
-          message: newMsg,
-          conversation: conv,
-          isHandoffRequested: false
-        }),
+        broadcastRealtimeEvent('chat_message', aiVisitorPayload),
+        dispatchWebPushForRealtimeEvent('chat_message', aiVisitorPayload),
         (isFirstVisitorMsg || isBrandNewConv) ? broadcastRealtimeEvent('new_conversation', {
           conversationId: conv.id,
           conversation: conv
@@ -314,20 +421,35 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const aiMsgId = 'msg_' + Math.random().toString(36).substring(2, 10) + '_' + Date.now().toString(36);
-      const aiMsg: StoreMessage = {
-        id: aiMsgId,
-        conversation_id: freshConv.id,
-        sender_type: 'ai',
-        sender_name: `${activeSiteConfig.shortName} AI Assistant`,
-        content: aiRes.text,
-        is_whisper: false,
-        seq: (freshConv.messages.length || 0) + 1,
-        created_at: new Date().toISOString()
-      };
+      const replyItems: Array<{ text: string; isForm?: boolean; formType?: 'booking' }> =
+        (aiRes.messages && aiRes.messages.length > 0)
+          ? aiRes.messages
+          : [{ text: aiRes.text, isForm: aiRes.isForm, formType: aiRes.formType }];
 
-      freshConv.messages.push(aiMsg);
-      freshConv.updated_at = new Date().toISOString();
+      const baseSeq = (freshConv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
+      const baseTime = Date.now();
+      const createdAiMsgs: StoreMessage[] = [];
+
+      for (let i = 0; i < replyItems.length; i++) {
+        const item = replyItems[i];
+        const aiMsgId = 'msg_' + Math.random().toString(36).substring(2, 10) + '_' + (baseTime + i * 500).toString(36) + '_' + i;
+        const aiMsg: StoreMessage = {
+          id: aiMsgId,
+          conversation_id: freshConv.id,
+          sender_type: 'ai',
+          sender_name: `${activeSiteConfig.shortName} AI Assistant`,
+          content: sanitizeEmDashes(item.text),
+          is_whisper: false,
+          seq: baseSeq + i + 1,
+          created_at: new Date(baseTime + i * 500).toISOString(),
+          is_form: Boolean(item.isForm),
+          form_type: item.formType || undefined
+        };
+        freshConv.messages.push(aiMsg);
+        createdAiMsgs.push(aiMsg);
+      }
+      freshConv.updated_at = new Date(baseTime + (replyItems.length - 1) * 500).toISOString();
+
       let handoffSysMsg: StoreMessage | undefined;
       if (aiRes.handoffRequired) {
         freshConv.mode = 'human';
@@ -339,20 +461,31 @@ export async function POST(req: NextRequest) {
           sender_name: 'System',
           content: 'Transferring to a live support agent. Please hold on...',
           is_whisper: false,
-          seq: (freshConv.messages.length || 0) + 1,
-          created_at: new Date().toISOString()
+          seq: baseSeq + replyItems.length + 1,
+          created_at: new Date(baseTime + replyItems.length * 500).toISOString()
         };
         freshConv.messages.push(handoffSysMsg);
       }
 
       await Promise.all([
-        broadcastRealtimeEvent('chat_message', {
+        ...createdAiMsgs.map((m, idx) => {
+          const isLast = idx === createdAiMsgs.length - 1;
+          const aiReplyPayload = {
+            conversationId: freshConv.id,
+            message: m,
+            systemMessage: isLast ? handoffSysMsg : undefined,
+            conversation: freshConv,
+            isHandoffRequested: Boolean(isLast && aiRes.handoffRequired)
+          };
+          return broadcastRealtimeEvent('chat_message', aiReplyPayload);
+        }),
+        aiRes.handoffRequired ? dispatchWebPushForRealtimeEvent('chat_message', {
           conversationId: freshConv.id,
-          message: aiMsg,
+          message: createdAiMsgs[createdAiMsgs.length - 1],
           systemMessage: handoffSysMsg,
           conversation: freshConv,
-          isHandoffRequested: Boolean(aiRes.handoffRequired)
-        }),
+          isHandoffRequested: true
+        }) : Promise.resolve(),
         broadcastRealtimeEvent('new_conversation', {
           conversationId: freshConv.id,
           conversation: freshConv
@@ -363,7 +496,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         success: true,
         message: newMsg,
-        aiMessage: aiMsg,
+        aiMessage: createdAiMsgs[0],
+        aiMessages: createdAiMsgs,
         conversation: freshConv,
         conversationId: freshConv.id
       });
@@ -377,13 +511,15 @@ export async function POST(req: NextRequest) {
       conv.last_visitor_message_at = now;
     }
 
+    const msgPayload = {
+      conversationId: conv.id,
+      message: newMsg,
+      conversation: conv,
+      isHandoffRequested: false
+    };
     await Promise.all([
-      broadcastRealtimeEvent('chat_message', {
-        conversationId: conv.id,
-        message: newMsg,
-        conversation: conv,
-        isHandoffRequested: false
-      }),
+      broadcastRealtimeEvent('chat_message', msgPayload),
+      senderType === 'visitor' ? dispatchWebPushForRealtimeEvent('chat_message', msgPayload) : Promise.resolve(),
       (isFirstVisitorMsg || isBrandNewConv) ? broadcastRealtimeEvent('new_conversation', {
         conversationId: conv.id,
         conversation: conv
@@ -409,14 +545,46 @@ export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const conversationId = searchParams.get('conversationId');
-    if (!conversationId) {
-      return NextResponse.json({ error: 'Missing conversationId' }, { status: 400 });
+    let ids: string[] = [];
+
+    if (conversationId) {
+      ids = [conversationId];
+    } else {
+      try {
+        const body = await request.json();
+        if (Array.isArray(body?.conversationIds)) {
+          ids = body.conversationIds.filter((id: any) => typeof id === 'string' && id.trim().length > 0);
+        }
+      } catch {}
     }
 
-    await granularStore.deleteConversation(conversationId);
-    await broadcastRealtimeEvent('chat_deleted', { conversationId });
+    if (ids.length === 0) {
+      return NextResponse.json({ error: 'Missing conversationId or conversationIds' }, { status: 400 });
+    }
 
-    return NextResponse.json({ success: true, conversationId });
+    if (ids.length === 1) {
+      const conv = await granularStore.getConversation(ids[0]);
+      const visitorToken = conv?.visitor_id || conv?.id;
+      await granularStore.deleteConversation(ids[0]);
+      await broadcastRealtimeEvent('chat_deleted', {
+        conversationId: ids[0],
+        visitorToken,
+        visitorId: conv?.visitor_id
+      });
+    } else {
+      for (const id of ids) {
+        const conv = await granularStore.getConversation(id);
+        const visitorToken = conv?.visitor_id || conv?.id;
+        await broadcastRealtimeEvent('chat_deleted', {
+          conversationId: id,
+          visitorToken,
+          visitorId: conv?.visitor_id
+        });
+      }
+      await granularStore.deleteConversations(ids);
+    }
+
+    return NextResponse.json({ success: true, count: ids.length, deletedIds: ids });
   } catch (err: unknown) {
     console.error('[CHAT_DEBUG] Error in DELETE /api/chat/message:', err);
     const message = err instanceof Error ? err.message : 'Server error';

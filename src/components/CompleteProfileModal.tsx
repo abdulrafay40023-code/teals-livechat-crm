@@ -5,16 +5,19 @@ import { User, Phone, Mail, ArrowRight, Sparkles } from 'lucide-react';
 
 interface CompleteProfileModalProps {
   email: string;
-  onSubmit: (data: { fullName: string; phone: string }) => void;
+  initialName?: string;
+  onSubmit: (data: { fullName: string; phone: string; pseudoName?: string }) => void;
   onSignOut: () => void;
 }
 
 export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
   email,
+  initialName = '',
   onSubmit,
   onSignOut,
 }) => {
-  const [fullName, setFullName] = useState('');
+  const [fullName, setFullName] = useState(initialName);
+  const [pseudoName, setPseudoName] = useState('');
   const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -25,13 +28,17 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
       setError('Please enter your full name');
       return;
     }
+    if (!pseudoName.trim()) {
+      setError('Please enter your public display (pseudo) name');
+      return;
+    }
     if (!phone.trim()) {
       setError('Please enter a valid phone number');
       return;
     }
     setError('');
     setLoading(true);
-    onSubmit({ fullName, phone });
+    onSubmit({ fullName, phone, pseudoName: pseudoName.trim() });
   };
 
   return (
@@ -62,18 +69,36 @@ export const CompleteProfileModal: React.FC<CompleteProfileModalProps> = ({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-dark-text mb-1.5">
-              Full Name <span className="text-brand-rose">*</span>
+              Full Name (Real Name) <span className="text-brand-rose">*</span>
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
-                placeholder="Enter your full name"
+                placeholder="Enter your real full name"
                 required
                 className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-dark-text placeholder-dark-muted focus:outline-none focus:border-brand-primary transition-colors"
               />
             </div>
+            <p className="text-[10px] text-dark-muted mt-1">Visible only to CRM Administrators.</p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-dark-text mb-1.5">
+              Public Display (Pseudo) Name <span className="text-brand-rose">*</span>
+            </label>
+            <div className="relative">
+              <input
+                type="text"
+                value={pseudoName}
+                onChange={(e) => setPseudoName(e.target.value)}
+                placeholder="e.g. Jack, Alex, David, Sarah"
+                required
+                className="w-full bg-dark-surface border border-dark-border rounded-xl px-4 py-2.5 text-sm text-dark-text placeholder-dark-muted focus:outline-none focus:border-brand-primary transition-colors"
+              />
+            </div>
+            <p className="text-[10px] text-blue-400 mt-1">This is the persona name shown to website visitors in live chat.</p>
           </div>
 
           <div>

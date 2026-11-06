@@ -2,26 +2,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { granularStore, StoreVisitorSession } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { isPrivateIp, lookupGeoAsync } from '@/lib/geo';
+import { detectWebsiteSlugFromUrl } from '@/lib/websites-config';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
+    headers: corsHeaders,
   });
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { sessionId, visitorToken, currentPage, isNewPageView, propertySlug = 'teals-crm', sessionStartTime, pageTitle } = body;
+    const { sessionId, visitorToken, currentPage, fullUrl, isNewPageView, propertySlug = 'teals-crm', sessionStartTime, pageTitle } = body;
 
-    if (!sessionId || propertySlug === 'teals-crm' || propertySlug === 'salesflow-ai-main') {
-      return NextResponse.json({ success: true, isOnline: false, tracked: false });
+    if (!sessionId || propertySlug === 'salesflow-ai-main') {
+      return NextResponse.json({ success: true, isOnline: false, tracked: false }, { headers: corsHeaders });
     }
+
+    const refererHeader = req.headers.get('referer');
+    const effectiveSlug = (propertySlug && propertySlug !== 'teals-crm' && propertySlug !== 'salesflow-ai-main')
+      ? propertySlug
+      : detectWebsiteSlugFromUrl(fullUrl || currentPage || refererHeader);
 
     let ip =
       req.headers.get('cf-connecting-ip') ||
@@ -43,6 +51,9 @@ export async function POST(req: NextRequest) {
       // Normal path: session exists, update last_active_at and keep online
       session.is_online = true;
       session.last_active_at = new Date().toISOString();
+      if ((!session.property_slug || session.property_slug === 'teals-crm') && effectiveSlug && effectiveSlug !== 'teals-crm') {
+        session.property_slug = effectiveSlug;
+      }
 
       // Ensure created_at is preserved
       if (!session.created_at && sessionStartTime) {
@@ -80,7 +91,7 @@ export async function POST(req: NextRequest) {
         granularStore.incrementPageView();
       }
       await granularStore.saveSession(session);
-      return NextResponse.json({ success: true, isOnline: true });
+      return NextResponse.json({ success: true, isOnline: true }, { headers: corsHeaders });
     }
 
     // Reconstitute session in memory without triggering retrackNeeded / arrival broadcast
@@ -93,13 +104,13 @@ export async function POST(req: NextRequest) {
     const newSession: StoreVisitorSession = {
       id: sessionId,
       visitor_token: visitorToken || sessionId,
-      property_slug: propertySlug,
+      property_slug: effectiveSlug && effectiveSlug !== 'teals-crm' ? effectiveSlug : 'amz-solutions-hub',
       ip_address: ip,
       country: geo.country,
       country_code: geo.countryCode,
       city: geo.city,
       flag: geo.flag,
-      referrer: 'Direct',
+      referrer: refererHeader || 'Direct',
       current_page: currentPage || '/',
       page_title: pageTitle || '',
       browser: 'Browser',
@@ -110,10 +121,10 @@ export async function POST(req: NextRequest) {
       created_at: sessionStartTime || new Date().toISOString()
     };
     await granularStore.saveSession(newSession);
-    return NextResponse.json({ success: true, isOnline: true });
+    return NextResponse.json({ success: true, isOnline: true }, { headers: corsHeaders });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500, headers: corsHeaders });
   }
 }
 

@@ -1,22 +1,115 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { granularStore } from '@/lib/store';
+import { granularStore, StoreAgent } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { createClient } from '@supabase/supabase-js';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+const CRM_SUPABASE_URL = "https://nyjhbeqpjfdhhvqvjzyy.supabase.co";
+const CRM_SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55amhiZXFwamZkaGh2cXZqenl5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYwMTAyMTgsImV4cCI6MjEwMTU4NjIxOH0.dng1sTshSzApFQia9YPkGsaBiiwWSJYduX_bAl5asPM";
+
+const crmSupabase = createClient(CRM_SUPABASE_URL, CRM_SUPABASE_KEY);
+
+const ADMIN_EMAILS = [
+  'garryamelia6265@gmail.com',
+  'tzafar04@gmail.com',
+  'annusraees@gmail.com'
+];
+
 export async function GET(req: NextRequest) {
   try {
-    const allAgents = await granularStore.getAllAgents();
-    const pendingAgents = allAgents.filter(a => a.status === 'pending');
-    const approvedAgents = allAgents.filter(a => a.status === 'approved');
+    // 1. Fetch live registered profiles directly from CRM Supabase
+    const { data: crmProfiles } = await crmSupabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    // Seed default 3 main Admins
+    const adminMap = new Map<string, StoreAgent>([
+      ['garryamelia6265@gmail.com', {
+        id: 'agent_garry_admin',
+        full_name: 'Garry Amelia',
+        email: 'garryamelia6265@gmail.com',
+        role: 'admin',
+        status: 'approved',
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }],
+      ['tzafar04@gmail.com', {
+        id: 'agent_tzafar_admin',
+        full_name: 'T Zafar',
+        email: 'tzafar04@gmail.com',
+        role: 'admin',
+        status: 'approved',
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }],
+      ['annusraees@gmail.com', {
+        id: 'agent_annus_admin',
+        full_name: 'Annus Raees',
+        email: 'annusraees@gmail.com',
+        role: 'admin',
+        status: 'approved',
+        is_online: true,
+        last_seen_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
+      }]
+    ]);
+
+    const workingAgentMap = new Map<string, StoreAgent>();
+
+    if (Array.isArray(crmProfiles)) {
+      crmProfiles.forEach(p => {
+        if (!p.email) return;
+        const cleanEmail = p.email.toLowerCase().trim();
+        const isAdm = ADMIN_EMAILS.includes(cleanEmail) || p.role === 'admin';
+
+        let isApproved = isAdm;
+        if (p.avatar_url) {
+          try {
+            const parsed = typeof p.avatar_url === 'string' ? JSON.parse(p.avatar_url) : p.avatar_url;
+            if (typeof parsed?.approved === 'boolean') {
+              isApproved = parsed.approved;
+            }
+          } catch {}
+        }
+
+        // Only include approved agents
+        if (!isApproved) return;
+
+        const agentObj: StoreAgent = {
+          id: p.id || `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+          full_name: p.full_name || cleanEmail.split('@')[0],
+          email: cleanEmail,
+          role: isAdm ? 'admin' : 'agent',
+          status: 'approved',
+          is_online: true,
+          last_seen_at: p.created_at || new Date().toISOString(),
+          created_at: p.created_at || new Date().toISOString()
+        };
+
+        if (isAdm) {
+          adminMap.set(cleanEmail, agentObj);
+        } else {
+          workingAgentMap.set(cleanEmail, agentObj);
+        }
+      });
+    }
+
+    const approvedAgents = [
+      ...Array.from(adminMap.values()),
+      ...Array.from(workingAgentMap.values())
+    ];
     const onlineAgents = approvedAgents.filter(a => a.is_online);
 
     return NextResponse.json({
-      pendingAgents,
+      pendingAgents: [],
       approvedAgents,
       onlineAgents,
-      totalAgents: allAgents.length
+      totalAgents: approvedAgents.length
     }, {
       headers: {
         'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',

@@ -1,5 +1,5 @@
 import { supabaseAdmin } from '@/lib/supabase';
-import { WEBSITES } from '@/lib/websites-config';
+import { WEBSITES, WebsiteConfig, buildCustomWebsiteConfig, getWebsiteConfig, REMOVED_WEBSITE_SLUGS } from '@/lib/websites-config';
 
 const BUCKET = 'teals-live-store';
 
@@ -29,11 +29,17 @@ export interface StoreMessage {
   conversation_id: string;
   sender_type: 'visitor' | 'agent' | 'ai' | 'system';
   sender_name: string;
+  sender_pseudo_name?: string;
+  sender_role_title?: string;
+  sender_real_name?: string;
   content: string;
   is_whisper?: boolean;
   seq?: number;
   status?: 'sent' | 'delivered' | 'read';
   created_at: string;
+  is_form?: boolean;
+  form_type?: 'booking';
+  form_data?: any;
 }
 
 export interface StoreConversation {
@@ -42,12 +48,20 @@ export interface StoreConversation {
   visitor_id: string;
   visitor_name: string;
   visitor_email?: string;
+  visitor_phone?: string;
   visitor_ip?: string;
   visitor?: StoreVisitorSession;
   assigned_agent_id?: string;
   assigned_agent_name?: string;
   assigned_agent_email?: string;
+  assigned_agent_pseudo_name?: string;
+  assigned_agent_role_title?: string;
   assigned_at?: string;
+  transferred_from_name?: string;
+  transferred_from_role?: string;
+  transferred_to_name?: string;
+  transfer_note?: string;
+  is_transferred?: boolean;
   mode: 'ai' | 'human';
   status: 'active' | 'pending_agent' | 'closed';
   typing_preview?: string;
@@ -65,8 +79,11 @@ export interface StoreAgent {
   id: string;
   email: string;
   full_name: string;
+  pseudo_name?: string;
+  role_title?: string;
   phone?: string;
   role: 'admin' | 'agent';
+  assigned_websites?: string[];
   status: 'pending' | 'approved' | 'rejected';
   is_online: boolean;
   last_seen_at: string;
@@ -84,18 +101,13 @@ export const STAFF_EMAILS: string[] = [
   'garryamelia6265@gmail.com',
   'tzafar04@gmail.com',
   'annusraees@gmail.com',
-  'abdulrafay40023@gmail.com',
   'jennifer.cisternino2027@gmail.com'
 ];
 
 export const STAFF_NAMES: string[] = [
   'garry amelia',
   't zafar',
-  'annus raees',
-  'abdul rafay',
-  'abdulrafay',
-  'murtuza mehdi',
-  'murtuza'
+  'annus raees'
 ];
 
 export function isUserAdmin(email?: string | null, role?: string | null): boolean {
@@ -225,19 +237,98 @@ class GranularStore {
   readonly sessionCache = new Map<string, StoreVisitorSession>();
   readonly convCache = new Map<string, StoreConversation>();
   readonly agents = new Map<string, StoreAgent>();
+  readonly customWebsites = new Map<string, WebsiteConfig>();
+  readonly removedWebsites = new Set<string>();
   allTimeIps = new Set<string>();
   readonly todayIps = new Map<string, Set<string>>();
   private totalViews = 0;
   private storageLoaded = false;
   private sessionFileTimestamps = new Map<string, string>();
   private lastResetAt = 0;
+  private deletedConvIds = new Set<string>();
 
   getLastResetAt(): number {
     return this.lastResetAt;
   }
 
+  getDeletedConvIds(): Set<string> {
+    return this.deletedConvIds;
+  }
+
+  isConversationDeleted(id: string): boolean {
+    if (!id) return false;
+    const cleanId = sanitizeKey(id);
+    return this.deletedConvIds.has(id) || this.deletedConvIds.has(cleanId);
+  }
+
+  async getLastResetAtAsync(): Promise<number> {
+    await this.ensureStorageLoaded();
+    return this.lastResetAt;
+  }
+
   setLastResetAt(ts: number): void {
     this.lastResetAt = ts;
+  }
+
+  getCustomWebsites(): WebsiteConfig[] {
+    return Array.from(this.customWebsites.values());
+  }
+
+  getRemovedWebsites(): string[] {
+    return Array.from(this.removedWebsites.values());
+  }
+
+  async saveCustomWebsite(input: {
+    name: string;
+    domain: string;
+    slug?: string;
+    category?: 'ecommerce' | 'publishing' | 'crm';
+  }): Promise<WebsiteConfig> {
+    await this.ensureStorageLoaded();
+    const cfg = buildCustomWebsiteConfig(input);
+    this.removedWebsites.delete(cfg.slug);
+    REMOVED_WEBSITE_SLUGS.delete(cfg.slug);
+    this.customWebsites.set(cfg.slug, cfg);
+    WEBSITES[cfg.slug] = cfg;
+
+    const payload = JSON.stringify(Array.from(this.customWebsites.values()));
+    const removedPayload = JSON.stringify(Array.from(this.removedWebsites.values()));
+    try {
+      await Promise.allSettled([
+        supabaseAdmin.storage.from('teals-live-store').upload('meta/custom_websites.json', payload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-livechat').upload('meta/custom_websites.json', payload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-live-store').upload('meta/removed_websites.json', removedPayload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-livechat').upload('meta/removed_websites.json', removedPayload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+      ]);
+    } catch (e) {
+      console.error('Error saving custom websites to storage:', e);
+    }
+
+    return cfg;
+  }
+
+  async removeWebsite(slug: string): Promise<void> {
+    await this.ensureStorageLoaded();
+    const cleanSlug = (slug || '').trim().toLowerCase();
+    if (!cleanSlug) return;
+
+    this.removedWebsites.add(cleanSlug);
+    REMOVED_WEBSITE_SLUGS.add(cleanSlug);
+    this.customWebsites.delete(cleanSlug);
+    delete WEBSITES[cleanSlug];
+
+    const payload = JSON.stringify(Array.from(this.customWebsites.values()));
+    const removedPayload = JSON.stringify(Array.from(this.removedWebsites.values()));
+    try {
+      await Promise.allSettled([
+        supabaseAdmin.storage.from('teals-live-store').upload('meta/custom_websites.json', payload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-livechat').upload('meta/custom_websites.json', payload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-live-store').upload('meta/removed_websites.json', removedPayload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+        supabaseAdmin.storage.from('teals-livechat').upload('meta/removed_websites.json', removedPayload, { upsert: true, contentType: 'application/json', cacheControl: '0' }),
+      ]);
+    } catch (e) {
+      console.error('Error removing website from storage:', e);
+    }
   }
 
   constructor() {
@@ -274,33 +365,9 @@ class GranularStore {
       last_seen_at: new Date().toISOString(),
       created_at: new Date().toISOString()
     };
-    const agent: StoreAgent = {
-      id: 'agent_abdul_rafay',
-      email: 'abdulrafay40023@gmail.com',
-      full_name: 'Abdul Rafay',
-      phone: '+92 300 1234567',
-      role: 'agent',
-      status: 'approved',
-      is_online: true,
-      last_seen_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    };
-    const adminMurtuza: StoreAgent = {
-      id: 'agent_25mowqm',
-      email: 'jennifer.cisternino2027@gmail.com',
-      full_name: 'Murtuza Mehdi',
-      phone: '+16508786634',
-      role: 'admin',
-      status: 'approved',
-      is_online: true,
-      last_seen_at: new Date().toISOString(),
-      created_at: new Date().toISOString()
-    };
     this.agents.set(adminGarry.email.toLowerCase(), adminGarry);
     this.agents.set(adminTzafar.email.toLowerCase(), adminTzafar);
     this.agents.set(adminAnnus.email.toLowerCase(), adminAnnus);
-    this.agents.set(adminMurtuza.email.toLowerCase(), adminMurtuza);
-    this.agents.set(agent.email.toLowerCase(), agent);
   }
 
   async getSession(sessionId: string): Promise<StoreVisitorSession | null> {
@@ -376,6 +443,11 @@ class GranularStore {
   }
 
   async getConversation(convId: string): Promise<StoreConversation | null> {
+    if (!convId) return null;
+    await this.ensureStorageLoaded();
+    if (this.deletedConvIds.has(convId) || this.deletedConvIds.has(sanitizeKey(convId))) {
+      return null;
+    }
     let conv = this.convCache.get(convId) || null;
 
     try {
@@ -391,9 +463,22 @@ class GranularStore {
           const assignedEmail = conv?.assigned_agent_email || cloudConv.assigned_agent_email;
           const status = isHuman && assignedId ? 'active' : (conv?.status === 'pending_agent' || cloudConv.status === 'pending_agent' ? 'pending_agent' : (conv?.status || cloudConv.status || 'active'));
 
+          const session = conv?.visitor || cloudConv.visitor || 
+                          this.sessionCache.get(conv?.visitor_id || cloudConv.visitor_id || '') || 
+                          this.sessionCache.get(convId) || 
+                          Array.from(this.sessionCache.values()).find(s => 
+                            s.visitor_token === (conv?.visitor_id || cloudConv.visitor_id) || 
+                            s.id === (conv?.visitor_id || cloudConv.visitor_id) || 
+                            s.visitor_token === convId ||
+                            s.id === convId ||
+                            ((conv?.visitor_ip || cloudConv.visitor_ip) && s.ip_address === (conv?.visitor_ip || cloudConv.visitor_ip))
+                          );
+
           const merged: StoreConversation = {
             ...cloudConv,
             ...(conv || {}),
+            visitor: session || conv?.visitor || cloudConv.visitor,
+            visitor_ip: conv?.visitor_ip || cloudConv.visitor_ip || session?.ip_address,
             mode: isHuman ? 'human' : 'ai',
             status,
             assigned_agent_id: assignedId,
@@ -422,11 +507,70 @@ class GranularStore {
     const cleanEmail = (email || '').trim().toLowerCase();
     const allConvs = Array.from(this.convCache.values());
 
-    return allConvs.filter(c => {
-      if (c.id === visitorToken || c.visitor_id === visitorToken) return true;
-      if (cleanEmail && c.visitor_email && c.visitor_email.toLowerCase() === cleanEmail) return true;
-      return false;
-    }).sort((a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime());
+    const associatedTokens = new Set<string>();
+    if (visitorToken) {
+      associatedTokens.add(visitorToken);
+      const session = this.sessionCache.get(visitorToken);
+      if (session) {
+        if (session.visitor_token) associatedTokens.add(session.visitor_token);
+        if (session.id) associatedTokens.add(session.id);
+      }
+      for (const s of Array.from(this.sessionCache.values())) {
+        if (s.visitor_token === visitorToken || s.id === visitorToken) {
+          if (s.visitor_token) associatedTokens.add(s.visitor_token);
+          if (s.id) associatedTokens.add(s.id);
+        }
+      }
+    }
+
+    const matchingConvs = allConvs.filter(c => {
+      if (this.deletedConvIds.has(c.id) || this.deletedConvIds.has(sanitizeKey(c.id))) return false;
+      const isAssociated = (associatedTokens.size > 0 && (associatedTokens.has(c.id) || associatedTokens.has(c.visitor_id || ''))) ||
+                           Boolean(cleanEmail && c.visitor_email && c.visitor_email.toLowerCase() === cleanEmail);
+      if (!isAssociated) return false;
+
+      // Filter out empty chats with NO real visitor or agent messages
+      const realMsgs = (c.messages || []).filter(m => m && m.id !== 'init-greet' && m.seq !== 1 && (m.sender_type === 'visitor' || m.sender_type === 'agent'));
+      return realMsgs.length > 0;
+    });
+
+    // Chronological order: earliest created first
+    matchingConvs.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+
+    // Deterministic chat_number: if already has explicit chat_number === 2, preserve it; otherwise first is 1, second is 2
+    if (matchingConvs.length === 1) {
+      matchingConvs[0].chat_number = (matchingConvs[0].chat_number === 2) ? 2 : 1;
+    } else if (matchingConvs.length >= 2) {
+      const hasChat2 = matchingConvs.some(c => c.chat_number === 2);
+      if (hasChat2) {
+        matchingConvs.forEach(c => {
+          c.chat_number = (c.chat_number === 2) ? 2 : 1;
+        });
+      } else {
+        matchingConvs[0].chat_number = 1;
+        matchingConvs[1].chat_number = 2;
+      }
+    }
+
+    // Return with Chat #1 first, Chat #2 (if any) second
+    const orderedConvs = [...matchingConvs].sort((a, b) => (a.chat_number || 1) - (b.chat_number || 1));
+
+    return orderedConvs.map(c => {
+      const session = c.visitor || 
+                      this.sessionCache.get(c.visitor_id || '') || 
+                      this.sessionCache.get(c.id) || 
+                      Array.from(this.sessionCache.values()).find(s => 
+                        s.visitor_token === c.visitor_id || 
+                        s.id === c.visitor_id || 
+                        s.visitor_token === c.id ||
+                        (c.visitor_ip && s.ip_address === c.visitor_ip)
+                      );
+      return {
+        ...c,
+        visitor: session || c.visitor,
+        visitor_ip: c.visitor_ip || session?.ip_address
+      };
+    });
   }
 
   async saveConversation(conv: StoreConversation): Promise<StoreConversation> {
@@ -462,9 +606,22 @@ class GranularStore {
     const mergedMessages = sortMessagesChronologically(Array.from(msgMap.values()));
     const isClaimed = !!(conv.assigned_agent_id || existing?.assigned_agent_id || conv.assigned_agent_name || existing?.assigned_agent_name);
 
+    const session = conv.visitor || 
+                    existing?.visitor || 
+                    this.sessionCache.get(conv.visitor_id || '') || 
+                    this.sessionCache.get(conv.id) || 
+                    Array.from(this.sessionCache.values()).find(s => 
+                      s.visitor_token === conv.visitor_id || 
+                      s.id === conv.visitor_id || 
+                      s.visitor_token === conv.id ||
+                      ((conv.visitor_ip || existing?.visitor_ip) && s.ip_address === (conv.visitor_ip || existing?.visitor_ip))
+                    );
+
     const mergedConv: StoreConversation = {
       ...(existing || {}),
       ...conv,
+      visitor: session || conv.visitor || existing?.visitor,
+      visitor_ip: conv.visitor_ip || existing?.visitor_ip || session?.ip_address,
       mode: isClaimed || conv.mode === 'human' || existing?.mode === 'human' ? 'human' : 'ai',
       status: isClaimed ? 'active' : (conv.status === 'pending_agent' || existing?.status === 'pending_agent' ? 'pending_agent' : 'active'),
       assigned_agent_id: conv.assigned_agent_id || existing?.assigned_agent_id,
@@ -495,6 +652,55 @@ class GranularStore {
   private async ensureStorageLoaded(): Promise<void> {
     try {
       try {
+        const { data: removedFile } = await supabaseAdmin.storage.from(BUCKET).download('meta/removed_websites.json');
+        if (removedFile) {
+          const removedText = await parseStorageData(removedFile);
+          if (removedText) {
+            const parsedRemoved = JSON.parse(removedText);
+            if (Array.isArray(parsedRemoved)) {
+              parsedRemoved.forEach((slug: string) => {
+                if (slug) {
+                  const cleanSlug = String(slug).trim().toLowerCase();
+                  this.removedWebsites.add(cleanSlug);
+                  REMOVED_WEBSITE_SLUGS.add(cleanSlug);
+                  this.customWebsites.delete(cleanSlug);
+                  delete WEBSITES[cleanSlug];
+                }
+              });
+            }
+          }
+        }
+      } catch {}
+
+      try {
+        const { data: customSitesFile } = await supabaseAdmin.storage.from(BUCKET).download('meta/custom_websites.json');
+        if (customSitesFile) {
+          const customText = await parseStorageData(customSitesFile);
+          if (customText) {
+            const parsedSites = JSON.parse(customText);
+            if (Array.isArray(parsedSites)) {
+              parsedSites.forEach((site: any) => {
+                if (site && site.slug && site.name && !this.removedWebsites.has(String(site.slug).toLowerCase())) {
+                  const cfg: WebsiteConfig = site.systemPrompt
+                    ? (site as WebsiteConfig)
+                    : buildCustomWebsiteConfig({
+                        name: site.name,
+                        domain: site.domain || site.url || site.slug,
+                        slug: site.slug,
+                        category: site.category
+                      });
+                  this.customWebsites.set(cfg.slug, cfg);
+                  if (!WEBSITES[cfg.slug]) {
+                    WEBSITES[cfg.slug] = cfg;
+                  }
+                }
+              });
+            }
+          }
+        }
+      } catch {}
+
+      try {
         const { data: resetFile } = await supabaseAdmin.storage.from(BUCKET).download('meta/system_reset.json');
         if (resetFile) {
           const resetText = await parseStorageData(resetFile);
@@ -507,11 +713,38 @@ class GranularStore {
         }
       } catch {}
 
-      // Clear any cached conversations created before lastResetAt
+      try {
+        const { data: delFile } = await supabaseAdmin.storage.from(BUCKET).download('meta/deleted_conversations.json');
+        if (delFile) {
+          const delText = await parseStorageData(delFile);
+          if (delText) {
+            const parsedDel = JSON.parse(delText);
+            if (Array.isArray(parsedDel)) {
+              this.deletedConvIds.clear();
+              parsedDel.forEach((id: string) => {
+                if (id) {
+                  this.deletedConvIds.add(id);
+                  this.deletedConvIds.add(sanitizeKey(id));
+                }
+              });
+            }
+          }
+        }
+      } catch {}
+
+      // Clear any cached conversations created before lastResetAt or marked as deleted
       if (this.lastResetAt > 0) {
         for (const [id, c] of Array.from(this.convCache.entries())) {
           const t = new Date(c.updated_at || c.created_at || 0).getTime();
           if (t < this.lastResetAt) {
+            this.convCache.delete(id);
+          }
+        }
+      }
+
+      if (this.deletedConvIds.size > 0) {
+        for (const [id] of Array.from(this.convCache.entries())) {
+          if (this.deletedConvIds.has(id) || this.deletedConvIds.has(sanitizeKey(id))) {
             this.convCache.delete(id);
           }
         }
@@ -532,12 +765,24 @@ class GranularStore {
         await Promise.all(cFiles.map(async (f) => {
           try {
             const id = f.name.replace('.json', '');
+            if (this.deletedConvIds.has(id) || this.deletedConvIds.has(sanitizeKey(id))) {
+              return;
+            }
             const { data } = await supabaseAdmin.storage.from(BUCKET).download(`conversations/${f.name}`);
             if (data) {
               const text = await parseStorageData(data);
               if (text) {
                 const c: StoreConversation = JSON.parse(text);
                 const existing = this.convCache.get(c.id) || this.convCache.get(id);
+                const session = c.visitor || existing?.visitor ||
+                                this.sessionCache.get(c.visitor_id || '') || 
+                                this.sessionCache.get(c.id) || 
+                                Array.from(this.sessionCache.values()).find(s => 
+                                  s.visitor_token === c.visitor_id || 
+                                  s.id === c.visitor_id || 
+                                  s.visitor_token === c.id ||
+                                  ((c.visitor_ip || existing?.visitor_ip) && s.ip_address === (c.visitor_ip || existing?.visitor_ip))
+                                );
                 if (existing) {
                   const msgMap = new Map<string, StoreMessage>();
                   (existing.messages || []).forEach(m => msgMap.set(m.id, m));
@@ -548,8 +793,12 @@ class GranularStore {
                   c.assigned_agent_email = c.assigned_agent_email || existing.assigned_agent_email;
                   c.mode = (c.assigned_agent_id || existing.assigned_agent_id || c.mode === 'human' || existing.mode === 'human') ? 'human' : 'ai';
                   c.status = (c.assigned_agent_id || existing.assigned_agent_id) ? 'active' : (c.status === 'pending_agent' || existing.status === 'pending_agent' ? 'pending_agent' : c.status);
+                  c.visitor = session || c.visitor || existing.visitor;
+                  c.visitor_ip = c.visitor_ip || existing.visitor_ip || session?.ip_address;
                 } else {
                   c.messages = sortMessagesChronologically(c.messages || []);
+                  c.visitor = session || c.visitor;
+                  c.visitor_ip = c.visitor_ip || session?.ip_address;
                 }
                 this.convCache.set(c.id, c);
               }
@@ -612,6 +861,8 @@ class GranularStore {
       totalUniqueCount: number;
       chatCount: number;
     }>;
+    customWebsites: WebsiteConfig[];
+    removedWebsites: string[];
   }> {
     await this.ensureStorageLoaded();
 
@@ -627,20 +878,55 @@ class GranularStore {
       return (now - lastActive) < 45 * 1000;
     };
 
-    // Exclude any internal Teals CRM sessions from visitor monitoring
+    // Exclude any internal Teals CRM sessions or explicitly removed websites from visitor monitoring
     const allSessions = Array.from(this.sessionCache.values()).filter(s => {
       const p = (s.property_slug || '').toLowerCase().trim();
       const page = (s.current_page || '').toLowerCase();
       if (p === 'teals-crm' || p === 'salesflow-ai-main' || p === 'localhost') return false;
+      if (this.removedWebsites.has(p)) return false;
       if (page.includes('salesflow-ai-main.vercel.app') || page.includes('teals-livechat-saas.vercel.app')) return false;
       return true;
     });
-    const allConvs = Array.from(this.convCache.values());
+    const allConvs = Array.from(this.convCache.values()).filter(c => {
+      const id = (c.id || '').toLowerCase();
+      if (id.startsWith('test_verify_') || id.startsWith('test_live_backup_')) return false;
+      const p = (c.property_slug || '').toLowerCase().trim();
+      return !this.removedWebsites.has(p);
+    });
 
-    // Calculate total visit count per unique device (visitor_token / session id)
+    // Ensure any custom property_slug in sessions or conversations is registered in WEBSITES
+    allSessions.forEach(s => {
+      const slug = (s.property_slug || '').toLowerCase().trim();
+      if (slug && slug !== 'teals-crm' && slug !== 'all' && slug !== 'localhost' && slug !== 'salesflow-ai-main' && !this.removedWebsites.has(slug) && !WEBSITES[slug]) {
+        const cfg = getWebsiteConfig(slug, s.current_page || s.referrer);
+        if (cfg && cfg.slug !== 'teals-crm') {
+          this.customWebsites.set(cfg.slug, cfg);
+        }
+      }
+    });
+    allConvs.forEach(c => {
+      const slug = (c.property_slug || '').toLowerCase().trim();
+      if (slug && slug !== 'teals-crm' && slug !== 'all' && slug !== 'localhost' && slug !== 'salesflow-ai-main' && !this.removedWebsites.has(slug) && !WEBSITES[slug]) {
+        const cfg = getWebsiteConfig(slug);
+        if (cfg && cfg.slug !== 'teals-crm') {
+          this.customWebsites.set(cfg.slug, cfg);
+        }
+      }
+    });
+
+    // Deduplicate by unique IP address (or token/id if IP is unknown)
+    const getVisitorIdentityKey = (s: { ip_address?: string; visitor_token?: string; id?: string }): string => {
+      const ip = (s.ip_address || '').trim().replace(/^::ffff:/, '');
+      if (ip && ip !== '::1' && ip !== '127.0.0.1' && ip !== 'localhost' && ip !== 'unknown') {
+        return `ip_${ip}`;
+      }
+      return s.visitor_token || s.id || 'unknown';
+    };
+
+    // Calculate total visit count per unique visitor IP
     const visitCountMap = new Map<string, number>();
     allSessions.forEach(s => {
-      const key = s.visitor_token || s.id;
+      const key = getVisitorIdentityKey(s);
       visitCountMap.set(key, (visitCountMap.get(key) || 0) + 1);
     });
 
@@ -648,10 +934,10 @@ class GranularStore {
     const filteredSessions = isGlobal ? allSessions : allSessions.filter(s => s.property_slug === propertySlug);
     const rawLiveSessions = filteredSessions.filter(isSessionActive);
 
-    // Deduplicate by visitor_token / session ID: distinct devices on the same IP each appear as separate rows
+    // Deduplicate by IP: multiple tabs or windows from the same IP appear as one live visitor row
     const liveVisitorsMap = new Map<string, StoreVisitorSession>();
     rawLiveSessions.forEach(s => {
-      const key = s.visitor_token || s.id;
+      const key = getVisitorIdentityKey(s);
       const existing = liveVisitorsMap.get(key);
       const visits = visitCountMap.get(key) || 1;
       const enrichedSession: StoreVisitorSession = {
@@ -671,7 +957,7 @@ class GranularStore {
         liveVisitorsMap.set(key, {
           ...latestActiveSession,
           created_at: oldestCreatedAt,
-          visit_count: visits
+          visit_count: Math.max(existing.visit_count || 1, visits)
         });
       }
     });
@@ -682,9 +968,9 @@ class GranularStore {
     const currentAllTimeSet = new Set<string>();
     
     filteredSessions.forEach(s => {
-      const uniqueDeviceKey = s.visitor_token || s.ip_address || s.id;
-      if (uniqueDeviceKey) {
-        currentAllTimeSet.add(uniqueDeviceKey);
+      const ipKey = getVisitorIdentityKey(s);
+      if (ipKey) {
+        currentAllTimeSet.add(ipKey);
         try {
           const sDate = new Intl.DateTimeFormat('en-CA', {
             timeZone: 'Asia/Karachi',
@@ -693,10 +979,10 @@ class GranularStore {
             day: '2-digit'
           }).format(new Date(s.created_at || s.last_active_at));
           if (sDate === today) {
-            currentTodaySet.add(uniqueDeviceKey);
+            currentTodaySet.add(ipKey);
           }
         } catch {
-          currentTodaySet.add(uniqueDeviceKey);
+          currentTodaySet.add(ipKey);
         }
       }
     });
@@ -704,9 +990,35 @@ class GranularStore {
     this.todayIps.set(today, currentTodaySet);
     this.allTimeIps = currentAllTimeSet;
 
-    const filteredConvs = isGlobal ? allConvs : allConvs.filter(c => c.property_slug === propertySlug);
+    const filteredConvs = (isGlobal ? allConvs : allConvs.filter(c => c.property_slug === propertySlug))
+      .filter(c => {
+        if (this.deletedConvIds.has(c.id) || this.deletedConvIds.has(sanitizeKey(c.id))) return false;
+        return true;
+      });
     const activeConversations = filteredConvs.filter(c => {
       return (c.messages && c.messages.length > 0) || !!c.visitor_name || c.mode === 'human' || c.status === 'pending_agent' || !!c.assigned_agent_id;
+    }).map(c => {
+      const session = this.sessionCache.get(c.id) || 
+                      this.sessionCache.get(c.visitor_id || '') || 
+                      Array.from(this.sessionCache.values()).find(s => 
+                        s.visitor_token === c.visitor_id || 
+                        s.id === c.visitor_id || 
+                        s.visitor_token === c.id
+                      );
+      const isUnclaimedPending =
+        !c.assigned_agent_id &&
+        !c.assigned_agent_name &&
+        (c.status === 'pending_agent' || c.mode === 'human');
+      const lastUpdatedMs = new Date(c.updated_at || c.created_at || 0).getTime();
+      const isStalePending = isUnclaimedPending && (now - lastUpdatedMs > 90 * 1000) && (!session || !isSessionActive(session));
+
+      return {
+        ...c,
+        mode: isStalePending ? 'ai' : c.mode,
+        status: isStalePending ? 'active' : c.status,
+        visitor_ip: c.visitor_ip || session?.ip_address,
+        visitor: session || undefined
+      };
     });
 
     // Calculate per-website statistics for all configured websites
@@ -738,21 +1050,33 @@ class GranularStore {
     };
 
     Object.keys(WEBSITES).forEach(slug => {
+      if (this.removedWebsites.has(slug)) return;
       const siteSessions = allSessions.filter(s => isSessionForWebsite(s, slug));
 
       const siteLiveSessions = siteSessions.filter(isSessionActive);
       const siteLiveMap = new Map<string, StoreVisitorSession>();
       siteLiveSessions.forEach(s => {
-        const key = s.visitor_token || s.id;
-        siteLiveMap.set(key, s);
+        const key = getVisitorIdentityKey(s);
+        const existing = siteLiveMap.get(key);
+        if (!existing) {
+          siteLiveMap.set(key, s);
+        } else {
+          const isNewer = new Date(s.last_active_at).getTime() > new Date(existing.last_active_at).getTime();
+          if (isNewer) {
+            siteLiveMap.set(key, {
+              ...s,
+              created_at: new Date(existing.created_at).getTime() < new Date(s.created_at).getTime() ? existing.created_at : s.created_at
+            });
+          }
+        }
       });
 
       const siteTodaySet = new Set<string>();
       const siteAllTimeSet = new Set<string>();
       siteSessions.forEach(s => {
-        const uniqueDeviceKey = s.visitor_token || s.ip_address || s.id;
-        if (uniqueDeviceKey) {
-          siteAllTimeSet.add(uniqueDeviceKey);
+        const uniqueIpKey = getVisitorIdentityKey(s);
+        if (uniqueIpKey) {
+          siteAllTimeSet.add(uniqueIpKey);
           try {
             const sDate = new Intl.DateTimeFormat('en-CA', {
               timeZone: 'Asia/Karachi',
@@ -761,10 +1085,10 @@ class GranularStore {
               day: '2-digit'
             }).format(new Date(s.created_at || s.last_active_at));
             if (sDate === today) {
-              siteTodaySet.add(uniqueDeviceKey);
+              siteTodaySet.add(uniqueIpKey);
             }
           } catch {
-            siteTodaySet.add(uniqueDeviceKey);
+            siteTodaySet.add(uniqueIpKey);
           }
         }
       });
@@ -788,7 +1112,9 @@ class GranularStore {
       totalUniqueCount: this.allTimeIps.size,
       conversations: activeConversations,
       pageViews: this.totalViews,
-      websiteStats
+      websiteStats,
+      customWebsites: Array.from(this.customWebsites.values()),
+      removedWebsites: Array.from(this.removedWebsites.values())
     };
   }
 
@@ -797,8 +1123,7 @@ class GranularStore {
       'garryamelia6265@gmail.com',
       'tzafar04@gmail.com',
       'annusraees@gmail.com',
-      'jennifer.cisternino2027@gmail.com',
-      'abdulrafay40023@gmail.com'
+      'jennifer.cisternino2027@gmail.com'
     ]);
 
     const validStorageEmails = new Set<string>();
@@ -827,8 +1152,8 @@ class GranularStore {
                   validStorageEmails.add(em);
                   if (ADMIN_EMAILS.includes(em)) {
                     a.role = 'admin';
-                    a.status = 'approved';
                   }
+                  a.status = 'approved';
                   this.agents.set(em, a);
                 }
               }
@@ -865,6 +1190,7 @@ class GranularStore {
       if (!cleanEmail || seenEmails.has(cleanEmail)) continue;
       if (cleanName && seenNames.has(cleanName)) continue;
 
+      a.status = 'approved';
       seenEmails.add(cleanEmail);
       if (cleanName) seenNames.add(cleanName);
       uniqueAgents.push(a);
@@ -889,8 +1215,8 @@ class GranularStore {
           if (em) {
             if (ADMIN_EMAILS.includes(em)) {
               a.role = 'admin';
-              a.status = 'approved';
             }
+            a.status = 'approved';
             this.agents.set(em, a);
             if (a.id) this.agents.set(a.id.toLowerCase(), a);
             return a;
@@ -975,53 +1301,79 @@ class GranularStore {
     }
 
     // Save as explicitly rejected in storage so auto-restore NEVER revives them
-    try {
-      const rejectKey = `rejected/${sanitizeKey(clean)}.json`;
-      await supabaseAdmin.storage.from(BUCKET).upload(rejectKey, JSON.stringify({ email: clean, rejected_at: new Date().toISOString() }), {
-        upsert: true,
-        contentType: 'application/json'
-      });
-    } catch {}
+    const buckets = ['teals-live-store', 'teals-livechat'];
+    const rejectKey = `rejected/${sanitizeKey(clean)}.json`;
+    const rejectPayload = JSON.stringify({ email: clean, rejected_at: new Date().toISOString() });
+    
+    for (const b of buckets) {
+      try {
+        await supabaseAdmin.storage.from(b).upload(rejectKey, rejectPayload, {
+          upsert: true,
+          contentType: 'application/json'
+        });
+      } catch {}
+    }
 
-    // Delete from Supabase storage bucket
-    try {
-      const { data: aFiles } = await supabaseAdmin.storage.from(BUCKET).list('agents', { limit: 1000 });
-      const filesToDelete = [
-        `agents/${sanitizeKey(clean)}.json`,
-        `agents/${sanitizeKey(emailOrId)}.json`
-      ];
+    // Delete from Supabase storage buckets
+    for (const b of buckets) {
+      try {
+        const { data: aFiles } = await supabaseAdmin.storage.from(b).list('agents', { limit: 1000 });
+        const { data: pFiles } = await supabaseAdmin.storage.from(b).list('pending', { limit: 1000 });
+        const filesToDelete: string[] = [
+          `agents/${sanitizeKey(clean)}.json`,
+          `agents/${sanitizeKey(emailOrId)}.json`,
+          `pending/${sanitizeKey(clean)}.json`,
+          `pending/${sanitizeKey(emailOrId)}.json`
+        ];
 
-      if (aFiles && aFiles.length > 0) {
         const cleanSanitized = sanitizeKey(clean).toLowerCase();
         const cleanAlphanum = clean.replace(/[^a-z0-9]/g, '');
-        for (const f of aFiles) {
-          const fname = f.name.toLowerCase();
-          if (
-            fname === `${cleanSanitized}.json` ||
-            fname.includes(cleanSanitized) ||
-            (cleanAlphanum.length > 3 && fname.includes(cleanAlphanum))
-          ) {
-            filesToDelete.push(`agents/${f.name}`);
-            filesToDelete.push(f.name);
+
+        if (aFiles && aFiles.length > 0) {
+          for (const f of aFiles) {
+            const fname = f.name.toLowerCase();
+            if (
+              fname === `${cleanSanitized}.json` ||
+              fname.includes(cleanSanitized) ||
+              (cleanAlphanum.length > 3 && fname.includes(cleanAlphanum))
+            ) {
+              filesToDelete.push(`agents/${f.name}`);
+            }
           }
         }
-      }
 
-      const uniqueFiles = Array.from(new Set(filesToDelete));
-      await supabaseAdmin.storage.from(BUCKET).remove(uniqueFiles);
-    } catch (e) {
-      console.error('Error deleting agent from storage:', e);
+        if (pFiles && pFiles.length > 0) {
+          for (const f of pFiles) {
+            const fname = f.name.toLowerCase();
+            if (
+              fname === `${cleanSanitized}.json` ||
+              fname.includes(cleanSanitized) ||
+              (cleanAlphanum.length > 3 && fname.includes(cleanAlphanum))
+            ) {
+              filesToDelete.push(`pending/${f.name}`);
+            }
+          }
+        }
+
+        const uniqueFiles = Array.from(new Set(filesToDelete));
+        await supabaseAdmin.storage.from(b).remove(uniqueFiles);
+      } catch (e) {
+        console.error(`Error deleting agent files from bucket ${b}:`, e);
+      }
     }
   }
 
   async isAgentRejected(email: string): Promise<boolean> {
     const clean = (email || '').toLowerCase().trim();
     if (!clean) return false;
-    try {
-      const rejectKey = `rejected/${sanitizeKey(clean)}.json`;
-      const { data } = await supabaseAdmin.storage.from(BUCKET).download(rejectKey);
-      if (data) return true;
-    } catch {}
+    const buckets = ['teals-live-store', 'teals-livechat'];
+    const rejectKey = `rejected/${sanitizeKey(clean)}.json`;
+    for (const b of buckets) {
+      try {
+        const { data } = await supabaseAdmin.storage.from(b).download(rejectKey);
+        if (data) return true;
+      } catch {}
+    }
     return false;
   }
 
@@ -1044,11 +1396,36 @@ class GranularStore {
     const cleanId = sanitizeKey(id);
     this.convCache.delete(id);
     this.convCache.delete(cleanId);
+    this.deletedConvIds.add(id);
+    this.deletedConvIds.add(cleanId);
+
+    const keysToRemove = new Set<string>([
+      `conversations/${cleanId}.json`,
+      `conversations/${id}.json`
+    ]);
+
+    // Only purge the specific conversation matching id (DO NOT wipe visitor_id as visitor is shared across Chat 1 and Chat 2)
+    for (const [key, c] of Array.from(this.convCache.entries())) {
+      if (c.id === id || c.id === cleanId) {
+        this.convCache.delete(key);
+        this.deletedConvIds.add(c.id);
+        this.deletedConvIds.add(sanitizeKey(c.id));
+        keysToRemove.add(`conversations/${sanitizeKey(c.id)}.json`);
+        keysToRemove.add(`conversations/${c.id}.json`);
+      }
+    }
+
+    const buckets = ['teals-live-store', 'teals-livechat'];
+    const pathsToRemove = Array.from(keysToRemove);
+
     try {
-      const key = `conversations/${cleanId}.json`;
-      await Promise.allSettled([
-        supabaseAdmin.storage.from('teals-live-store').remove([key]),
-        supabaseAdmin.storage.from('teals-livechat').remove([key])
+      const payload = JSON.stringify(Array.from(this.deletedConvIds));
+      await Promise.all([
+        ...buckets.map(b => supabaseAdmin.storage.from(b).remove(pathsToRemove).catch(() => {})),
+        ...buckets.map(b => supabaseAdmin.storage.from(b).upload('meta/deleted_conversations.json', payload, {
+          upsert: true,
+          contentType: 'application/json'
+        }).catch(() => {}))
       ]);
       return true;
     } catch (e) {
@@ -1056,9 +1433,52 @@ class GranularStore {
       return false;
     }
   }
+
+  async deleteConversations(ids: string[]): Promise<boolean> {
+    if (!ids || ids.length === 0) return true;
+    const keysToRemove = new Set<string>();
+    const idSet = new Set(ids);
+
+    for (const id of ids) {
+      const cleanId = sanitizeKey(id);
+      this.convCache.delete(id);
+      this.convCache.delete(cleanId);
+      this.deletedConvIds.add(id);
+      this.deletedConvIds.add(cleanId);
+      keysToRemove.add(`conversations/${cleanId}.json`);
+      keysToRemove.add(`conversations/${id}.json`);
+    }
+
+    for (const [key, c] of Array.from(this.convCache.entries())) {
+      if (idSet.has(c.id) || idSet.has(sanitizeKey(c.id))) {
+        this.convCache.delete(key);
+        this.deletedConvIds.add(c.id);
+        this.deletedConvIds.add(sanitizeKey(c.id));
+        keysToRemove.add(`conversations/${sanitizeKey(c.id)}.json`);
+        keysToRemove.add(`conversations/${c.id}.json`);
+      }
+    }
+
+    const buckets = ['teals-live-store', 'teals-livechat'];
+    const pathsToRemove = Array.from(keysToRemove);
+    try {
+      const payload = JSON.stringify(Array.from(this.deletedConvIds));
+      await Promise.all([
+        ...buckets.map(b => supabaseAdmin.storage.from(b).remove(pathsToRemove).catch(() => {})),
+        ...buckets.map(b => supabaseAdmin.storage.from(b).upload('meta/deleted_conversations.json', payload, {
+          upsert: true,
+          contentType: 'application/json'
+        }).catch(() => {}))
+      ]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   
   async clearAllConversations(): Promise<void> {
     this.convCache.clear();
+    this.deletedConvIds.clear();
     this.lastResetAt = Date.now();
     const buckets = ['teals-live-store', 'teals-livechat'];
     const payload = JSON.stringify({ resetAt: this.lastResetAt });
@@ -1070,6 +1490,7 @@ class GranularStore {
           await supabaseAdmin.storage.from(b).remove(paths);
         }
         await supabaseAdmin.storage.from(b).upload('meta/system_reset.json', payload, { upsert: true, contentType: 'application/json' });
+        await supabaseAdmin.storage.from(b).remove(['meta/deleted_conversations.json']);
       } catch (e) {
         console.error(`Error clearing conversations from bucket ${b}:`, e);
       }

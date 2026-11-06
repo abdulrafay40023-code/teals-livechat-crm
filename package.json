@@ -11,15 +11,19 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.0",
     "@supabase/supabase-js": "^2.49.1",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
+    "@types/web-push": "^3.6.4",
     "clsx": "^2.1.1",
     "geoip-lite": "^2.0.3",
     "lucide-react": "^0.477.0",
     "next": "14.2.23",
+    "nodemailer": "^10.3.1",
     "pg": "^8.23.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^3.0.2"
+    "tailwind-merge": "^3.0.2",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/node": "^20.17.23",

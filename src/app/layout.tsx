@@ -4,6 +4,10 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Teals CRM - LiveChat & Visitor Intelligence Suite',
   description: 'Real-time AI customer support, live visitor tracking, and hybrid human handoff SaaS platform.',
+  icons: {
+    icon: '/favicon.png?v=3',
+    apple: '/apple-touch-icon.png?v=3',
+  },
 };
 
 export default function RootLayout({

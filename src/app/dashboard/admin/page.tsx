@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield, Check, X, Mail, Phone, Users, Code2, UserCheck, Activity, Laptop, Trash2 } from 'lucide-react';
@@ -42,7 +44,7 @@ export default function AdminPage() {
     }
     try {
       const agent = JSON.parse(rawSession);
-      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
+      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
       const isAdm = agent.role === 'admin' || (agent.email && adminEmails.includes(agent.email.toLowerCase()));
       if (!isAdm) {
         router.push('/dashboard');
@@ -243,8 +245,8 @@ export default function AdminPage() {
       </div>
 
       {/* 1. Live Working Agents Logged In Section */}
-      <div className="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-dark-card border border-dark-border rounded-2xl p-4 sm:p-6 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center space-x-2">
             <Activity className="w-5 h-5 text-brand-emerald" />
             <h3 className="text-sm font-bold text-white">
@@ -258,7 +260,7 @@ export default function AdminPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {approvedAgents.map((agent) => {
-            const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
+            const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
             const isAdminAgent = agent.role === 'admin' || (agent.email && adminEmails.includes(agent.email.toLowerCase()));
 
             return (
@@ -322,8 +324,8 @@ export default function AdminPage() {
       </div>
 
       {/* 2. Pending Approvals Section */}
-      <div className="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-xl">
-        <div className="flex items-center justify-between mb-4">
+      <div className="bg-dark-card border border-dark-border rounded-2xl p-4 sm:p-6 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <div className="flex items-center space-x-2">
             <Users className="w-5 h-5 text-brand-amber" />
             <h3 className="text-sm font-bold text-white">Pending Agent Approvals ({pendingAgents.length})</h3>
@@ -382,7 +384,7 @@ export default function AdminPage() {
       </div>
 
       {/* 3. Embed Script Card */}
-      <div className="bg-dark-card border border-dark-border rounded-2xl p-6 shadow-xl">
+      <div className="bg-dark-card border border-dark-border rounded-2xl p-4 sm:p-6 shadow-xl">
         <div className="flex items-center space-x-2 mb-3">
           <Code2 className="w-5 h-5 text-brand-secondary" />
           <h3 className="text-sm font-bold text-white">Embed Script for Teals CRM</h3>

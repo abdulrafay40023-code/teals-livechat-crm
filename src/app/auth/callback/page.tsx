@@ -1,5 +1,7 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
@@ -64,78 +66,41 @@ export default function AuthCallbackPage() {
     };
 
     const processUser = async (email: string, initialName: string) => {
-      const cached = typeof window !== 'undefined' ? localStorage.getItem('teals_pending_agent') : null;
-      let cachedPayload: any = null;
-      if (cached) {
-        try { cachedPayload = JSON.parse(cached); } catch {}
-      }
+      const cleanEmail = email.toLowerCase().trim();
+      const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
+      const isAdm = adminEmails.includes(cleanEmail);
 
-      const res = await fetch('/api/agent/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          fullName: cachedPayload?.name || initialName,
-          phone: cachedPayload?.phone
-        })
-      });
+      const defaultAgent = {
+        id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
+        email: cleanEmail,
+        full_name: initialName || cleanEmail.split('@')[0],
+        role: isAdm ? 'admin' : 'agent',
+        status: 'approved'
+      };
 
-      const data = await res.json();
-      if (!res.ok) {
-        // If we have cached pending, keep showing pending screen even if error
-        if (cachedPayload?.email && cachedPayload.email.toLowerCase() === email.toLowerCase()) {
-          setAgentData(cachedPayload);
-          setStep('pending');
-          setLoading(false);
-          return;
-        }
-        setError(data.error || 'Failed to authenticate');
-        setLoading(false);
-        return;
-      }
+      localStorage.setItem('teals_agent_session', JSON.stringify(defaultAgent));
+      localStorage.removeItem('teals_pending_agent');
 
-      if (data.status === 'needs_profile') {
-        if (cachedPayload?.email && cachedPayload.email.toLowerCase() === email.toLowerCase()) {
-          setAgentData(cachedPayload);
-          setStep('pending');
-          setLoading(false);
-          return;
-        }
-        localStorage.removeItem('teals_pending_agent');
-        localStorage.removeItem('teals_agent_session');
-        setAgentData({ full_name: initialName, email, phone: '' });
-        setStep('needs_profile');
-      } else if (data.status === 'pending') {
-        setAgentData(data.agent);
-        setStep('pending');
-        localStorage.setItem('teals_pending_agent', JSON.stringify(data.agent));
-        localStorage.setItem('teals_agent_session', JSON.stringify({ ...data.agent, status: 'pending' }));
-      } else if (data.status === 'approved') {
-        localStorage.removeItem('teals_pending_agent');
-        localStorage.setItem('teals_agent_session', JSON.stringify(data.agent));
-        router.push('/dashboard');
-      } else if (data.status === 'rejected') {
-        localStorage.removeItem('teals_pending_agent');
-        localStorage.removeItem('teals_agent_session');
-        try { await supabase.auth.signOut(); } catch {}
-        router.push('/login');
-        return;
-      }
-      setLoading(false);
-    };
-
-    // Restore cached pending state instantly on reload so agent never drops to login
-    const cachedPending = typeof window !== 'undefined' ? localStorage.getItem('teals_pending_agent') : null;
-    if (cachedPending) {
       try {
-        const parsed = JSON.parse(cachedPending);
-        if (parsed?.email) {
-          setAgentData(parsed);
-          setStep('pending');
-          setLoading(false);
+        const res = await fetch('/api/agent/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            fullName: initialName
+          })
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          if (data.agent) {
+            localStorage.setItem('teals_agent_session', JSON.stringify({ ...data.agent, status: 'approved' }));
+          }
         }
       } catch {}
-    }
+
+      router.push('/dashboard/chats');
+    };
 
     handleAuth();
   }, [router]);

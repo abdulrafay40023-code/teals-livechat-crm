@@ -3,26 +3,33 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import {
-  Users, MessageSquare, Eye, Radio, ArrowRight, RotateCcw,
+  Users, MessageSquare, Eye, Radio, ArrowRight, Code2, PlusCircle, Sparkles,
   ExternalLink, ShoppingCart, Rocket, BookOpen, PenTool, BookMarked,
-  Globe, Activity, Layers
+  Globe, Activity, Layers, Trash2, AlertTriangle, X
 } from 'lucide-react';
 import { useLiveSync } from '@/context/LiveSyncContext';
 import { getAllWebsites, WEBSITES } from '@/lib/websites-config';
+import { EmbedCodeModal } from '@/components/EmbedCodeModal';
 
 export default function OverviewDashboard() {
   const {
     liveVisitors,
     conversations,
+    websites: contextWebsites,
     liveCount,
     todayCount,
     totalUniqueCount,
     chatCount,
     websiteStats,
-    resetAll
+    isWebsitePermitted,
+    removeWebsite,
   } = useLiveSync();
 
-  const [resetting, setResetting] = useState(false);
+  const [embedModalOpen, setEmbedModalOpen] = useState(false);
+  const [selectedEmbedSlug, setSelectedEmbedSlug] = useState<string>('amz-solutions-hub');
+  const [siteToRemove, setSiteToRemove] = useState<{ slug: string; name: string; domain: string } | null>(null);
+  const [removingSite, setRemovingSite] = useState(false);
+
   const [currentAgent, setCurrentAgent] = useState<{
     id: string;
     email: string;
@@ -40,33 +47,11 @@ export default function OverviewDashboard() {
     } catch {}
   }, []);
 
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
   const isAdmin = !currentAgent || currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
-  // Working agents rule: Only visible when visitor requested a real human agent OR already claimed by this agent
-  const isConvVisibleToAgent = (c: any) => {
-    if (isAdmin) return true;
-
-    const isMine = !!(
-      (c.claimed_by && c.claimed_by === currentAgent?.id) ||
-      (c.assigned_agent_id && c.assigned_agent_id === currentAgent?.id) ||
-      (c.assigned_agent && currentAgent && (
-        c.assigned_agent.toLowerCase() === currentAgent.email.toLowerCase() ||
-        c.assigned_agent.toLowerCase() === currentAgent.full_name.toLowerCase()
-      ))
-    );
-    if (isMine) return true;
-
-    const hasHumanNeed = (
-      c.status === 'queued' ||
-      c.status === 'open' ||
-      c.claimed === true ||
-      c.needs_human === true ||
-      c.mode === 'human'
-    );
-    const notClaimedByOther = !c.claimed_by || c.claimed_by === currentAgent?.id;
-    return hasHumanNeed && notClaimedByOther;
-  };
+  // Full visibility: Working agents and Admins see ALL conversations across all websites
+  const isConvVisibleToAgent = (_c?: any) => true;
 
   const getTodayDayName = () => {
     try {
@@ -78,16 +63,10 @@ export default function OverviewDashboard() {
 
   const dayName = getTodayDayName();
 
-  const handleReset = async () => {
-    setResetting(true);
-    try {
-      await resetAll();
-    } finally {
-      setResetting(false);
-    }
-  };
-
-  const websites = getAllWebsites();
+  const websites = React.useMemo(() => {
+    const list = contextWebsites && contextWebsites.length > 0 ? contextWebsites : getAllWebsites();
+    return list.filter(w => isWebsitePermitted(w.slug));
+  }, [contextWebsites, isWebsitePermitted, currentAgent, websiteStats, liveVisitors]);
 
   const getWebsiteIcon = (slug: string) => {
     switch (slug) {
@@ -96,6 +75,7 @@ export default function OverviewDashboard() {
       case 'authors-breeze': return BookOpen;
       case 'pro-book-publishing': return PenTool;
       case 'amz-writers-hub': return BookMarked;
+      case 'patch-and-promos': return Sparkles;
       default: return Globe;
     }
   };
@@ -137,12 +117,19 @@ export default function OverviewDashboard() {
           badge: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
           btn: 'bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border-rose-500/40'
         };
+      case 'patch-and-promos':
+        return {
+          accent: 'border-cyan-500/30 hover:border-cyan-500/70 hover:shadow-cyan-500/10',
+          iconBg: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+          badge: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+          btn: 'bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border-cyan-500/40'
+        };
       default:
         return {
-          accent: 'border-blue-500/30 hover:border-blue-500/70 hover:shadow-blue-500/10',
-          iconBg: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-          badge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
-          btn: 'bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border-blue-500/40'
+          accent: 'border-indigo-500/30 hover:border-indigo-500/70 hover:shadow-indigo-500/10',
+          iconBg: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+          badge: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+          btn: 'bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 border-indigo-500/40'
         };
     }
   };
@@ -167,10 +154,10 @@ export default function OverviewDashboard() {
     });
 
     return {
-      liveCount: Math.max(liveForSite.length, stored?.liveCount || 0),
+      liveCount: stored?.liveCount ?? liveForSite.length,
       todayCount: stored?.todayCount ?? 0,
       totalUniqueCount: stored?.totalUniqueCount ?? 0,
-      chatCount: isAdmin ? (stored?.chatCount ?? chatsForSite.length) : chatsForSite.length,
+      chatCount: stored?.chatCount ?? chatsForSite.length,
     };
   };
 
@@ -183,7 +170,7 @@ export default function OverviewDashboard() {
             <h2 className="text-xl font-bold text-white tracking-tight">Overview Dashboard</h2>
             <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-brand-primary/15 text-brand-secondary border border-brand-primary/30 flex items-center space-x-1">
               <Layers className="w-3 h-3" />
-              <span>5 Websites Connected</span>
+              <span>{websites.length} {websites.length === 1 ? 'Website' : 'Websites'} Connected</span>
             </span>
           </div>
           <p className="text-xs text-dark-muted mt-1">
@@ -192,15 +179,6 @@ export default function OverviewDashboard() {
         </div>
 
         <div className="flex items-center space-x-2.5">
-          <button
-            onClick={handleReset}
-            disabled={resetting}
-            title="Reset all counters to 0"
-            className="px-3.5 py-2 rounded-xl bg-dark-card hover:bg-dark-cardHover border border-dark-border text-dark-muted hover:text-white text-xs font-semibold transition-all flex items-center space-x-1.5 shadow-sm"
-          >
-            <RotateCcw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin text-brand-secondary' : ''}`} />
-            <span>Reset to 0</span>
-          </button>
           <Link
             href="/dashboard/monitoring"
             className="px-4 py-2 rounded-xl bg-brand-primary/15 hover:bg-brand-primary/25 border border-brand-primary/30 text-brand-secondary text-xs font-bold transition-all flex items-center space-x-2 w-fit shadow-sm"
@@ -209,6 +187,32 @@ export default function OverviewDashboard() {
             <span>Open Live Monitoring</span>
           </Link>
         </div>
+      </div>
+
+      {/* Connect New Website / Custom Entity Banner (Top Placement) */}
+      <div className="bg-[#0b101d] border border-dashed border-purple-500/30 hover:border-purple-500/60 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-4 transition-all">
+        <div className="flex items-center space-x-3 text-left">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 flex-shrink-0">
+            <PlusCircle className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-xs font-bold text-white">Need to connect another website or custom entity?</h4>
+            <p className="text-[11px] text-dark-muted mt-0.5">
+              Generate a dedicated embed snippet for any 6th website or external domain with dedicated AI routing.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedEmbedSlug('custom-new-entity');
+            setEmbedModalOpen(true);
+          }}
+          className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all shadow-md shadow-purple-600/20 flex items-center space-x-2 flex-shrink-0 cursor-pointer hover:scale-105 active:scale-95"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>+ Generate Custom Website Code</span>
+        </button>
       </div>
 
       {/* 5 Distinct Dedicated Website Analytics Cards */}
@@ -316,20 +320,108 @@ export default function OverviewDashboard() {
                 </div>
 
                 {/* Card Action Footer */}
-                <div className="pt-3 border-t border-dark-border/60 flex items-center justify-between gap-2">
+                <div className="pt-3 border-t border-dark-border/60 flex items-center gap-2">
                   <Link
                     href={`/dashboard/chats?website=${site.slug}`}
-                    className={`w-full py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 shadow-sm ${theme.btn}`}
+                    className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 shadow-sm ${theme.btn}`}
                   >
                     <span>Open Live Inbox</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedEmbedSlug(site.slug);
+                      setEmbedModalOpen(true);
+                    }}
+                    title={`Get dedicated embed script for ${site.name}`}
+                    className="py-2 px-3 rounded-xl bg-[#0b101d] hover:bg-[#152038] border border-dark-border hover:border-gray-600 text-gray-300 hover:text-white text-xs font-semibold transition-all flex items-center space-x-1.5 shadow-sm flex-shrink-0 cursor-pointer"
+                  >
+                    <Code2 className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Get Code</span>
+                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setSiteToRemove({ slug: site.slug, name: site.name, domain: site.domain })}
+                      title={`Remove ${site.name} from entire system`}
+                      className="p-2 rounded-xl bg-[#0b101d] hover:bg-rose-500/20 border border-dark-border hover:border-rose-500/50 text-gray-400 hover:text-rose-400 transition-all shadow-sm flex-shrink-0 cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* Confirmation Modal for Removing a Website */}
+      {siteToRemove && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-[#0b101d] border border-rose-500/40 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400 flex-shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Remove Website from System?</h3>
+                  <p className="text-xs text-rose-300 font-semibold mt-0.5">
+                    {siteToRemove.name} ({siteToRemove.domain})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSiteToRemove(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-dark-card transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-300 leading-relaxed">
+              Are you sure you want to remove <strong className="text-white">{siteToRemove.name}</strong>? This will completely remove this brand&apos;s website box, live traffic tabs, and chat filters from the entire system (Overview Dashboard, Live Monitoring, Active Chats &amp; All Chats).
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-dark-border/80">
+              <button
+                type="button"
+                disabled={removingSite}
+                onClick={() => setSiteToRemove(null)}
+                className="px-4 py-2 rounded-xl bg-dark-card hover:bg-dark-surface border border-dark-border text-xs font-bold text-gray-300 hover:text-white transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={removingSite}
+                onClick={async () => {
+                  setRemovingSite(true);
+                  try {
+                    await removeWebsite(siteToRemove.slug);
+                    setSiteToRemove(null);
+                  } finally {
+                    setRemovingSite(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-xs font-bold text-white shadow-md shadow-rose-600/20 flex items-center space-x-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{removingSite ? 'Removing...' : 'Yes, Remove Website'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <EmbedCodeModal
+        isOpen={embedModalOpen}
+        onClose={() => setEmbedModalOpen(false)}
+        initialWebsiteSlug={selectedEmbedSlug}
+      />
     </div>
   );
 }

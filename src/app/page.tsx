@@ -5,7 +5,7 @@ import { useEffect } from 'react';
 export default function HomePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.location.replace('https://salesflow-ai-main.vercel.app/livechat');
+      window.location.replace('/dashboard/chats');
     }
   }, []);
 

@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+export const dynamic = 'force-dynamic';
+
+import React, { useState, useEffect, useMemo } from 'react';
 import { LiveChatConsole, ChatSession } from '@/components/LiveChatConsole';
-import { useLiveSync } from '@/context/LiveSyncContext';
+import { useLiveSync, LiveConversation } from '@/context/LiveSyncContext';
 import { getAllWebsites, getWebsiteConfig } from '@/lib/websites-config';
 import {
   Globe, ShoppingCart, Rocket, BookOpen, PenTool, BookMarked,
-  ExternalLink, Layers, ArrowRight, ArrowLeft, MessageSquare
+  ExternalLink, Layers, ArrowRight, ArrowLeft, MessageSquare, Sparkles
 } from 'lucide-react';
 
 export default function ChatsPage() {
@@ -14,7 +16,10 @@ export default function ChatsPage() {
     id: string;
     email: string;
     full_name: string;
+    pseudo_name?: string;
     role: string;
+    role_title?: string;
+    assigned_websites?: string[];
   }>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -22,18 +27,32 @@ export default function ChatsPage() {
         const ssoEmail = urlParams.get('sso_email');
         const ssoName = urlParams.get('sso_name');
         const ssoRole = urlParams.get('sso_role');
+        const ssoPseudo = urlParams.get('sso_pseudo');
+        const ssoRoleTitle = urlParams.get('sso_role_title');
+        const ssoWebsitesRaw = urlParams.get('sso_websites');
+
+        let assigned_websites: string[] = [];
+        if (!ssoWebsitesRaw || ssoWebsitesRaw === 'all' || ssoWebsitesRaw === 'none') assigned_websites = [];
+        else assigned_websites = ssoWebsitesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => Boolean(s) && s !== '__none__' && s !== 'none' && s !== 'all');
+
         if (ssoEmail) {
           const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
           const cleanEmail = ssoEmail.toLowerCase().trim();
           const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
+          const computedPseudo = ssoPseudo || (ssoName ? ssoName.split(' ')[0] : 'Support Agent');
+          const computedRoleTitle = ssoRoleTitle && ssoRoleTitle !== 'Manager' ? ssoRoleTitle : (isAdm ? 'Admin' : 'Support Specialist');
           const ssoAgent = {
             id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
             email: cleanEmail,
             full_name: ssoName || cleanEmail.split('@')[0],
+            pseudo_name: computedPseudo,
             role: isAdm ? 'admin' : (ssoRole || 'agent'),
-            status: 'approved'
+            role_title: computedRoleTitle,
+            status: 'approved',
+            assigned_websites: isAdm ? [] : assigned_websites,
           };
           localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+          localStorage.setItem('teals_assigned_websites', JSON.stringify(assigned_websites));
           return ssoAgent;
         }
 
@@ -43,12 +62,13 @@ export default function ChatsPage() {
           const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
           if (parsed?.email && adminEmails.includes(parsed.email.toLowerCase())) {
             parsed.role = 'admin';
+            if (!parsed.role_title || parsed.role_title === 'Manager') parsed.role_title = 'Admin';
           }
           return parsed;
         }
       } catch {}
     }
-    return { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' };
+    return { id: 'agent_garry_admin', full_name: 'Garry Amelia', pseudo_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin', role_title: 'Admin', assigned_websites: [] };
   });
 
   const getSelectedKey = (email?: string) => {
@@ -61,32 +81,93 @@ export default function ChatsPage() {
   // Default to null so the user is never forced into any section automatically on entry
   const [selectedWebsiteSlug, setSelectedWebsiteSlug] = useState<string | null>(null);
 
-  const { conversations, refreshSync, markConversationAsRead, readConvMap } = useLiveSync();
+  const { conversations, websites: contextWebsites, refreshSync, markConversationAsRead, readConvMap, isWebsitePermitted } = useLiveSync();
 
   useEffect(() => {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const websiteParam = urlParams.get('website') || urlParams.get('site') || urlParams.get('property');
+      const chatParam = urlParams.get('chat') || urlParams.get('conversationId') || urlParams.get('visitor') || urlParams.get('visitor_token');
+      
       if (websiteParam) {
         setSelectedWebsiteSlug(websiteParam);
+      }
+
+      if (chatParam) {
+        setSelectedChatId(chatParam);
+        const key = getSelectedKey(currentAgent?.email);
+        try {
+          localStorage.setItem(key, chatParam);
+          localStorage.setItem('teals_selected_chat_id', chatParam);
+        } catch {}
       }
 
       const ssoEmail = urlParams.get('sso_email');
       const ssoName = urlParams.get('sso_name');
       const ssoRole = urlParams.get('sso_role');
+      const ssoPseudo = urlParams.get('sso_pseudo');
+      const ssoRoleTitle = urlParams.get('sso_role_title');
+      const ssoWebsitesRaw = urlParams.get('sso_websites');
+
+      let assigned_websites: string[] = [];
+      if (!ssoWebsitesRaw || ssoWebsitesRaw === 'all' || ssoWebsitesRaw === 'none') assigned_websites = [];
+      else assigned_websites = ssoWebsitesRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => Boolean(s) && s !== '__none__' && s !== 'none' && s !== 'all');
+
+      let cachedPseudo = '';
+      let cachedRoleTitle = '';
+      try {
+        const prevSession = localStorage.getItem('teals_agent_session');
+        if (prevSession) {
+          const parsed = JSON.parse(prevSession);
+          cachedPseudo = parsed.pseudo_name || '';
+          cachedRoleTitle = parsed.role_title || '';
+        }
+      } catch {}
+
       if (ssoEmail) {
-        const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
+        const adminEmails = ['garryamelia6265@gmail.com', 'jennifer.cisternino2027@gmail.com', 'ashal.raza@teals.co', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
         const cleanEmail = ssoEmail.toLowerCase().trim();
         const isAdm = ssoRole === 'admin' || adminEmails.includes(cleanEmail);
         const ssoAgent = {
           id: `agent_${cleanEmail.replace(/[^a-z0-9]/g, '_')}`,
           email: cleanEmail,
           full_name: ssoName || cleanEmail.split('@')[0],
+          pseudo_name: ssoPseudo || cachedPseudo || (isAdm ? 'Admin' : undefined),
           role: isAdm ? 'admin' : (ssoRole || 'agent'),
-          status: 'approved'
+          role_title: ssoRoleTitle && ssoRoleTitle !== 'Manager' ? ssoRoleTitle : (isAdm ? 'Admin' : (cachedRoleTitle || 'Support Specialist')),
+          status: 'approved',
+          assigned_websites: isAdm ? [] : assigned_websites,
         };
         localStorage.setItem('teals_agent_session', JSON.stringify(ssoAgent));
+        localStorage.setItem('teals_assigned_websites', JSON.stringify(assigned_websites));
         setCurrentAgent(ssoAgent);
+
+        // Fetch latest profile from CRM Supabase to ensure pseudo_name & role_title are synced
+        import('@/lib/crm-supabase').then(({ crmSupabase }) => {
+          crmSupabase.from('profiles').select('avatar_url, full_name, role').eq('email', cleanEmail).maybeSingle().then(({ data: prof }) => {
+            if (prof?.avatar_url) {
+              try {
+                const meta = JSON.parse(prof.avatar_url);
+                if (meta.pseudo_name || meta.role_title || meta.assigned_websites) {
+                  setCurrentAgent(prev => {
+                    const updated = {
+                      ...prev,
+                      full_name: prof.full_name || prev.full_name,
+                      pseudo_name: meta.pseudo_name || prev.pseudo_name,
+                      role_title: meta.role_title || prev.role_title,
+                      assigned_websites: Array.isArray(meta.assigned_websites) ? meta.assigned_websites : prev.assigned_websites,
+                    };
+                    localStorage.setItem('teals_agent_session', JSON.stringify(updated));
+                    if (Array.isArray(meta.assigned_websites)) {
+                      localStorage.setItem('teals_assigned_websites', JSON.stringify(meta.assigned_websites));
+                    }
+                    return updated;
+                  });
+                }
+              } catch {}
+            }
+          });
+        });
         return;
       }
     } catch {}
@@ -108,7 +189,16 @@ export default function ChatsPage() {
     setSelectedWebsiteSlug(slug);
   };
 
-  const websites = getAllWebsites();
+  const websites = useMemo(() => {
+    const list = contextWebsites && contextWebsites.length > 0 ? contextWebsites : getAllWebsites();
+    return list.filter(w => isWebsitePermitted(w.slug));
+  }, [contextWebsites, isWebsitePermitted, currentAgent, conversations]);
+
+  useEffect(() => {
+    if (selectedWebsiteSlug && !websites.some(w => w.slug === selectedWebsiteSlug)) {
+      setSelectedWebsiteSlug(null);
+    }
+  }, [websites, selectedWebsiteSlug]);
 
   // Helper to compute unread count for any conversation
   const convHasUnread = (c: any) => {
@@ -124,12 +214,15 @@ export default function ChatsPage() {
     return savedId !== lastMsg.id && savedId !== 'all';
   };
 
-  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com', 'jennifer.cisternino2027@gmail.com'];
+  const adminEmails = ['garryamelia6265@gmail.com', 'tzafar04@gmail.com', 'annusraees@gmail.com'];
   const isAdmin = currentAgent.role === 'admin' || (currentAgent.email && adminEmails.includes(currentAgent.email.toLowerCase()));
 
-  // Active & AI conversations remain completely visible across agent/admin views
+  // Full visibility: Working agents and Admins see ALL conversations across all websites
+  // Only include genuine conversations (where either visitor replied or agent sent proactive outreach)
   const isConvVisibleToAgent = (c: any) => {
-    return true;
+    const hasVisitor = (c.messages || []).some((m: any) => m && m.sender_type === 'visitor' && m.content && m.content.trim().length > 0);
+    const hasAgent = (c.messages || []).some((m: any) => m && m.sender_type === 'agent' && m.content && m.content.trim().length > 0);
+    return hasVisitor || hasAgent || Boolean(c.is_proactive);
   };
 
   const agentConversations = conversations.filter(isConvVisibleToAgent);
@@ -140,9 +233,39 @@ export default function ChatsPage() {
     return { count: list.length, unread };
   };
 
-  const filteredConversations = selectedWebsiteSlug ? agentConversations.filter(c => {
-    return (c.property_slug || 'amz-solutions-hub') === selectedWebsiteSlug;
-  }) : [];
+  const filteredConversations = useMemo(() => {
+    if (!selectedWebsiteSlug) return [];
+    const list = agentConversations.filter(c => {
+      return (c.property_slug || 'amz-solutions-hub') === selectedWebsiteSlug;
+    });
+
+    // If an agent clicked Chat from Monitoring table for a live visitor who has not messaged yet
+    if (typeof window !== 'undefined') {
+      try {
+        const urlParams = new URLSearchParams(window.location.search);
+        const visitorParam = urlParams.get('visitor') || urlParams.get('visitor_token') || urlParams.get('chat');
+        if (visitorParam && !list.some(c => c.id === visitorParam || c.visitor_id === visitorParam)) {
+          const proactiveConv: LiveConversation = {
+            id: visitorParam,
+            property_slug: selectedWebsiteSlug,
+            visitor_id: visitorParam,
+            visitor_name: 'Live Visitor',
+            mode: 'human',
+            status: 'active',
+            assigned_agent_id: currentAgent.id,
+            assigned_agent_name: currentAgent.full_name,
+            assigned_agent_email: currentAgent.email,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            messages: []
+          };
+          list.unshift(proactiveConv);
+        }
+      } catch {}
+    }
+
+    return list;
+  }, [agentConversations, selectedWebsiteSlug, currentAgent]);
 
   const activeSiteConfig = selectedWebsiteSlug ? getWebsiteConfig(selectedWebsiteSlug) : null;
 
@@ -153,20 +276,21 @@ export default function ChatsPage() {
       case 'authors-breeze': return BookOpen;
       case 'pro-book-publishing': return PenTool;
       case 'amz-writers-hub': return BookMarked;
+      case 'patch-and-promos': return Sparkles;
       default: return Globe;
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-3">
+    <div className="w-full space-y-3">
       {/* Header & Section Title */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <div className="flex items-center space-x-2">
-            <h1 className="text-xl font-bold text-white tracking-tight">Active Chats & AI Handoff</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">Active Chats & AI Handoff</h1>
             <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-400 border border-blue-500/30 flex items-center space-x-1">
               <Layers className="w-3 h-3" />
-              <span>5 Websites Connected</span>
+              <span>{websites.length} {websites.length === 1 ? 'Website' : 'Websites'} Connected</span>
             </span>
           </div>
           <p className="text-xs text-dark-muted mt-0.5">
@@ -175,8 +299,8 @@ export default function ChatsPage() {
         </div>
 
         {activeSiteConfig && (
-          <div className="flex items-center space-x-2 text-xs bg-[#11192e] border border-dark-border px-3 py-1.5 rounded-xl self-start sm:self-auto">
-            <span className="w-2 h-2 rounded-full bg-brand-emerald animate-pulse" />
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs bg-[#11192e] border border-dark-border px-3 py-1.5 rounded-xl self-start sm:self-auto max-w-full">
+            <span className="w-2 h-2 rounded-full bg-brand-emerald animate-pulse shrink-0" />
             <span className="text-white font-semibold">{activeSiteConfig.shortName} Section</span>
             <span className="text-dark-muted">•</span>
             <a
@@ -200,10 +324,10 @@ export default function ChatsPage() {
         )}
       </div>
 
-      {/* Top 5-Website Dedicated Isolated Inboxes */}
-      <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-2 shadow-xl">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-          {/* 5 Distinct Dedicated Website Sections */}
+      {/* Top Dedicated Website Isolated Inboxes (Hidden on mobile when in Section Picker view to avoid duplicate list) */}
+      <div className={`${!selectedWebsiteSlug ? 'hidden sm:block' : 'block'} bg-[#0b101d] border border-dark-border rounded-2xl p-2 shadow-xl`}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+          {/* Distinct Dedicated Website Sections */}
           {websites.map((site) => {
             const IconComponent = getWebsiteIcon(site.slug);
             const isSelected = selectedWebsiteSlug === site.slug;
@@ -246,19 +370,19 @@ export default function ChatsPage() {
       </div>
 
       {!selectedWebsiteSlug ? (
-        <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-6 sm:p-10 shadow-2xl space-y-6 text-center">
-          <div className="max-w-xl mx-auto space-y-2">
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold">
+        <div className="bg-[#0b101d] border border-dark-border rounded-2xl p-4 sm:p-10 shadow-2xl space-y-4 sm:space-y-6 text-center">
+          <div className="max-w-xl mx-auto space-y-1.5 sm:space-y-2">
+            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[11px] sm:text-xs font-bold">
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Multi-Website Live Inboxes</span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">Select a Website Section</h2>
+            <h2 className="text-lg sm:text-2xl font-bold text-white tracking-tight">Select a Website Section</h2>
             <p className="text-xs sm:text-sm text-dark-muted">
               Choose which website inbox you want to open. Incoming visitor chats are completely isolated per website.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl mx-auto text-left pt-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-w-5xl mx-auto text-left pt-1 sm:pt-2">
             {websites.map((site) => {
               const IconComponent = getWebsiteIcon(site.slug);
               const stats = getWebsiteStats(site.slug);
@@ -267,7 +391,7 @@ export default function ChatsPage() {
                 <div
                   key={site.slug}
                   onClick={() => handleSelectWebsiteTab(site.slug)}
-                  className="group bg-[#0e1628] hover:bg-[#131f38] border border-dark-border hover:border-blue-500/60 rounded-2xl p-5 cursor-pointer transition-all duration-200 hover:shadow-xl hover:shadow-blue-500/10 flex flex-col justify-between space-y-4"
+                  className="group bg-[#0e1628] hover:bg-[#131f38] border border-dark-border hover:border-blue-500/60 rounded-2xl p-3.5 sm:p-5 cursor-pointer transition-all duration-200 hover:shadow-xl hover:shadow-blue-500/10 flex flex-col justify-between space-y-3 sm:space-y-4"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3">
@@ -305,9 +429,16 @@ export default function ChatsPage() {
         </div>
       ) : (
         <LiveChatConsole
-          currentAgent={currentAgent || { id: 'agent_garry_admin', full_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' }}
+          currentAgent={currentAgent || { id: 'agent_garry_admin', full_name: 'Garry Amelia', pseudo_name: 'Garry Amelia', email: 'garryamelia6265@gmail.com', role: 'admin' }}
           selectedChatId={selectedChatId}
           conversations={filteredConversations as unknown as ChatSession[]}
+          onUpdateAgent={(updated) => {
+            setCurrentAgent(prev => {
+              const next = { ...prev, ...updated };
+              try { localStorage.setItem('teals_agent_session', JSON.stringify(next)); } catch {}
+              return next;
+            });
+          }}
           onSelectChat={(id) => {
             setSelectedChatId(id || null);
             const key = getSelectedKey(currentAgent?.email);

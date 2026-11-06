@@ -5,8 +5,9 @@ export interface GeoInfo {
   flagUrl: string;
 }
 
-export function getCountryFlagUrl(countryCode: string): string {
-  const code = (countryCode || 'UN').toLowerCase().trim();
+export function getCountryFlagUrl(countryCode?: string | null): string {
+  let code = (countryCode || 'UN').toLowerCase().trim();
+  if (code === 'uk') code = 'gb';
   if (code.length === 2 && code !== 'un') {
     return `https://flagcdn.com/24x18/${code}.png`;
   }
@@ -77,30 +78,40 @@ export function isPrivateIp(ip: string): boolean {
 }
 
 // Cache geo results to avoid repeated API calls for same IP
-const geoCache = new Map<string, { country: string; countryCode: string; city: string; flag: string }>();
+const geoCache = new Map<string, { country: string; countryCode: string; city: string; flag: string; timezone?: string }>();
 
 export interface EdgeGeoHints {
   countryCode?: string;
   city?: string;
   region?: string;
+  timezone?: string;
+}
+
+export interface GeoLocationResult {
+  country: string;
+  countryCode: string;
+  city: string;
+  flag: string;
+  timezone?: string;
 }
 
 export async function lookupGeoAsync(
   ip: string,
   hints?: EdgeGeoHints
-): Promise<{ country: string; countryCode: string; city: string; flag: string }> {
+): Promise<GeoLocationResult> {
   const cleanIp = (ip || '').trim();
 
-  // 1. If edge headers already provided reliable country AND city from Vercel / Cloudflare
-  if (hints?.countryCode && hints.countryCode.length === 2 && hints.countryCode.toUpperCase() !== 'XX' && hints.city && hints.city.trim() !== '') {
+  // 1. If edge headers already provided reliable country from Vercel / Cloudflare
+  if (hints?.countryCode && hints.countryCode.length === 2 && hints.countryCode.toUpperCase() !== 'XX') {
     const code = hints.countryCode.toUpperCase();
     const country = getCountryName(code);
-    const city = hints.city.trim();
-    const result = {
+    const city = (hints.city && hints.city.trim() !== '') ? hints.city.trim() : (hints.region || country);
+    const result: GeoLocationResult = {
       country,
       countryCode: code,
       city,
-      flag: getCountryFlagUrl(code)
+      flag: getCountryFlagUrl(code),
+      timezone: hints?.timezone
     };
     if (cleanIp && !isPrivateIp(cleanIp)) {
       geoCache.set(cleanIp, result);
@@ -110,7 +121,7 @@ export async function lookupGeoAsync(
 
   // 2. Handle private / local IPs
   if (!cleanIp || isPrivateIp(cleanIp)) {
-    return { country: 'Pakistan', countryCode: 'PK', city: 'Lahore', flag: getCountryFlagUrl('PK') };
+    return { country: 'United States', countryCode: 'US', city: 'United States', flag: getCountryFlagUrl('US'), timezone: hints?.timezone || 'America/New_York' };
   }
 
   // 3. Check memory cache
@@ -120,7 +131,7 @@ export async function lookupGeoAsync(
 
   // 4. Primary Provider: ip-api.com
   try {
-    const response = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,country,countryCode,city,regionName`, {
+    const response = await fetch(`http://ip-api.com/json/${cleanIp}?fields=status,country,countryCode,city,regionName,timezone`, {
       signal: AbortSignal.timeout(2500)
     });
     if (response.ok) {
@@ -129,7 +140,13 @@ export async function lookupGeoAsync(
         const countryCode = data.countryCode as string;
         const city = (data.city && data.city !== '') ? data.city : (data.regionName || 'Unknown');
         const country = getCountryName(countryCode) || data.country || countryCode;
-        const result = { country, countryCode, city, flag: getCountryFlagUrl(countryCode) };
+        const result: GeoLocationResult = {
+          country,
+          countryCode,
+          city,
+          flag: getCountryFlagUrl(countryCode),
+          timezone: data.timezone || hints?.timezone
+        };
         geoCache.set(cleanIp, result);
         return result;
       }
@@ -149,7 +166,13 @@ export async function lookupGeoAsync(
         const countryCode = data.country_code as string;
         const city = data.city || data.region || 'Unknown';
         const country = getCountryName(countryCode) || data.country || countryCode;
-        const result = { country, countryCode, city, flag: getCountryFlagUrl(countryCode) };
+        const result: GeoLocationResult = {
+          country,
+          countryCode,
+          city,
+          flag: getCountryFlagUrl(countryCode),
+          timezone: data.timezone?.id || hints?.timezone
+        };
         geoCache.set(cleanIp, result);
         return result;
       }
@@ -169,7 +192,13 @@ export async function lookupGeoAsync(
         const countryCode = data.countryCode as string;
         const city = data.cityName || 'Unknown';
         const country = getCountryName(countryCode) || data.countryName || countryCode;
-        const result = { country, countryCode, city, flag: getCountryFlagUrl(countryCode) };
+        const result: GeoLocationResult = {
+          country,
+          countryCode,
+          city,
+          flag: getCountryFlagUrl(countryCode),
+          timezone: (data.timeZones && data.timeZones[0]) || hints?.timezone
+        };
         geoCache.set(cleanIp, result);
         return result;
       }
@@ -193,7 +222,7 @@ export async function lookupGeoAsync(
 // Synchronous version - kept for compatibility
 export function lookupGeo(ip: string): { country: string; countryCode: string; city: string; flag: string } {
   if (!ip || isPrivateIp(ip)) {
-    return { country: 'Pakistan', countryCode: 'PK', city: 'Lahore', flag: getCountryFlagUrl('PK') };
+    return { country: 'United States', countryCode: 'US', city: 'United States', flag: getCountryFlagUrl('US') };
   }
   if (geoCache.has(ip)) {
     return geoCache.get(ip)!;

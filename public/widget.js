@@ -27,12 +27,16 @@
     if (h.indexOf('authorsbreeze.com') !== -1) return 'authors-breeze';
     if (h.indexOf('probookpublishing.com') !== -1) return 'pro-book-publishing';
     if (h.indexOf('amzwritershub.com') !== -1) return 'amz-writers-hub';
+    if (h.indexOf('patchandpromos.com') !== -1) return 'patch-and-promos';
+    if (h && h !== 'localhost' && h !== '127.0.0.1' && h.indexOf('vercel.app') === -1) {
+      return h.replace(/^www\./, '').replace(/\.[a-z.]+$/, '').replace(/[^a-z0-9]+/g, '-');
+    }
     return null;
   }
 
   var explicitSlug = scriptEl && (scriptEl.getAttribute('data-property-slug') || scriptEl.getAttribute('data-property'));
   var detectedSlug = detectSlugFromHostname(window.location.hostname);
-  var propertySlug = explicitSlug || detectedSlug || 'teals-crm';
+  var propertySlug = explicitSlug || detectedSlug || 'amz-solutions-hub';
   var isAdmin = window.location.pathname.startsWith('/dashboard') || window.location.pathname.startsWith('/admin');
 
   // PER-TAB SESSION ID GENERATED STRICTLY ONCE PER TAB
@@ -84,43 +88,43 @@
     };
   }
 
-  function sendTracking(isNew) {
-    if (isAdmin) return;
-    try {
-      var pageInfo = getCurrentPageInfo();
-      var referrer = document.referrer || 'Direct';
-
-      var welcomedKey = 'teals_visitor_welcomed_' + tabSessionId;
-      var alreadyWelcomed = false;
+    var hasTrackedSessionKey = 'teals_visitor_tracked_' + tabSessionId;
+    function sendTracking(isNew) {
+      if (isAdmin) return;
       try {
-        alreadyWelcomed = Boolean(sessionStorage.getItem(welcomedKey));
+        var pageInfo = getCurrentPageInfo();
+        var referrer = document.referrer || 'Direct';
+
+        var alreadyTracked = false;
+        try {
+          alreadyTracked = Boolean(sessionStorage.getItem(hasTrackedSessionKey));
+        } catch (e) {}
+        var isFirstVisit = !alreadyTracked;
+        if (isFirstVisit) {
+          try { sessionStorage.setItem(hasTrackedSessionKey, '1'); } catch (e) {}
+        }
+
+        fetch(serverOrigin + '/api/visitor/track', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: tabSessionId,
+            visitorToken: visitorToken,
+            propertySlug: propertySlug,
+            currentPage: pageInfo.path,
+            fullUrl: pageInfo.fullUrl,
+            pageTitle: pageInfo.title,
+            referrer: referrer,
+            isNewPageView: isNew,
+            isFirstVisit: isFirstVisit,
+            sessionStartTime: tabStartTime
+          })
+        }).catch(function () {});
       } catch (e) {}
-      var isFirstVisit = !alreadyWelcomed;
-      if (isFirstVisit) {
-        try { sessionStorage.setItem(welcomedKey, '1'); } catch (e) {}
-      }
+    }
 
-      fetch(serverOrigin + '/api/visitor/track', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: tabSessionId,
-          visitorToken: visitorToken,
-          propertySlug: propertySlug,
-          currentPage: pageInfo.path,
-          fullUrl: pageInfo.fullUrl,
-          pageTitle: pageInfo.title,
-          referrer: referrer,
-          isNewPageView: isNew,
-          isFirstVisit: isFirstVisit,
-          sessionStartTime: tabStartTime
-        })
-      }).catch(function () {});
-    } catch (e) {}
-  }
-
-  // Initial track on page load
-  sendTracking(true);
+    // Initial track on page load
+    sendTracking(true);
 
   function sendPing() {
     if (isAdmin) return;
@@ -292,9 +296,9 @@
           iframe.style.width = '400px';
           iframe.style.height = '580px';
         } else if (e.data.isOpen === 'bubble') {
-          // Show greeting bubble - expand enough to not clip
-          iframe.style.width = '340px';
-          iframe.style.height = '130px';
+          // Show greeting bubble - expand enough so multiline agent message is never clipped
+          iframe.style.width = '380px';
+          iframe.style.height = '200px';
         } else {
           iframe.style.width = '80px';
           iframe.style.height = '80px';

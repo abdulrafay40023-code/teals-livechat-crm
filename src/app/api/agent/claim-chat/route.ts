@@ -1,10 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { granularStore, StoreMessage } from '@/lib/store';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { crmSupabase } from '@/lib/crm-supabase';
 
 export async function POST(req: NextRequest) {
   try {
-    const { conversationId, agentId: rawAgentId, agentName: rawAgentName, agentEmail, force = false } = await req.json();
+    const {
+      conversationId,
+      agentId: rawAgentId,
+      agentName: rawAgentName,
+      agentEmail,
+      agentPseudoName,
+      agentRoleTitle,
+      isTransfer = false,
+      transferredFromName,
+      transferredFromRole,
+      transferNote,
+      force = false
+    } = await req.json();
 
     const agentName = rawAgentName || 'Support Agent';
     const agentId = rawAgentId || `agent_${(agentEmail || agentName).toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
@@ -19,32 +32,47 @@ export async function POST(req: NextRequest) {
     }
 
     // ATOMIC RACE CONDITION CHECK: If already claimed by another agent, reject with 409 Conflict
-    if (!force && conv.assigned_agent_id && conv.assigned_agent_id !== agentId) {
+    if (!force && !isTransfer && conv.assigned_agent_id && conv.assigned_agent_id !== agentId && conv.status === 'active') {
       return NextResponse.json({
         success: false,
-        error: `This chat was just claimed by ${conv.assigned_agent_name}`,
-        claimedBy: conv.assigned_agent_name,
+        error: `This chat was just claimed by ${conv.assigned_agent_pseudo_name || conv.assigned_agent_name}`,
+        claimedBy: conv.assigned_agent_pseudo_name || conv.assigned_agent_name,
         assignedAgentId: conv.assigned_agent_id
       }, { status: 409 });
     }
 
-    const isTransfer = (!!conv.assigned_agent_name && conv.assigned_agent_name !== agentName) || force;
     const now = new Date().toISOString();
     conv.assigned_agent_id = agentId;
     conv.assigned_agent_name = agentName;
     conv.assigned_agent_email = agentEmail;
+    if (agentPseudoName) conv.assigned_agent_pseudo_name = agentPseudoName;
+    if (agentRoleTitle) conv.assigned_agent_role_title = agentRoleTitle;
     conv.assigned_at = now;
     conv.mode = 'human';
-    conv.status = 'active';
+
+    if (isTransfer) {
+      conv.status = 'pending_agent'; // Locked state for target recipient
+      conv.is_transferred = true;
+      conv.transferred_from_name = transferredFromName || 'Support Agent';
+      conv.transferred_from_role = transferredFromRole || 'Agent';
+      conv.transferred_to_name = agentName;
+      conv.transfer_note = transferNote || '';
+    } else {
+      conv.status = 'active';
+      conv.is_transferred = false;
+    }
+
     const maxSeq = (conv.messages || []).reduce((max, m) => Math.max(max, m.seq || 0), 0);
+    const displayPseudo = agentPseudoName || conv.assigned_agent_pseudo_name || 'Support Agent';
+    const displayRole = agentRoleTitle || conv.assigned_agent_role_title || '';
     const sysMsg: StoreMessage = {
       id: 'msg_sys_claim_' + conv.id + '_' + Date.now(),
       conversation_id: conv.id,
       sender_type: 'system',
       sender_name: 'System',
       content: isTransfer
-        ? `Chat transferred to Real Agent.`
-        : `Real Agent has joined the conversation.`,
+        ? `Chat transferred to ${displayPseudo}.`
+        : `${displayPseudo}${displayRole ? ` (${displayRole})` : ''} has joined the conversation.`,
       is_whisper: false,
       seq: maxSeq + 1,
       created_at: now
@@ -68,8 +96,24 @@ export async function POST(req: NextRequest) {
       conversationId: conv.id,
       agentId,
       agentName,
+      agentPseudoName: displayPseudo,
+      agentRoleTitle: displayRole,
       conversation: conv
     });
+
+    // Automatically assign linked meeting & lead in CRM Supabase to the claiming agent
+    if (agentEmail && conv.visitor_email) {
+      Promise.allSettled([
+        crmSupabase
+          .from('meetings')
+          .update({ agent_email: agentEmail })
+          .ilike('title', `%${conv.visitor_email}%`),
+        crmSupabase
+          .from('leads')
+          .update({ assigned_agent_name: agentEmail, assigned_to: agentEmail })
+          .ilike('email', conv.visitor_email)
+      ]).catch(() => {});
+    }
 
     return NextResponse.json({
       success: true,

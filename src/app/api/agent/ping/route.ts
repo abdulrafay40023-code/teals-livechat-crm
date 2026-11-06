@@ -12,8 +12,8 @@ export async function POST(req: NextRequest) {
     const isAdmin = ADMIN_EMAILS.includes(cleanEmail);
     const nowIso = new Date().toISOString();
 
-    let defaultName = 'Abdul Rafay';
-    let defaultId = 'agent_' + Math.random().toString(36).substring(2, 9);
+    let defaultName = cleanEmail.split('@')[0];
+    let defaultId = 'agent_' + cleanEmail.replace(/[^a-z0-9]/g, '_');
     if (cleanEmail === 'garryamelia6265@gmail.com') {
       defaultName = 'Garry Amelia';
       defaultId = 'agent_garry_admin';
@@ -23,19 +23,6 @@ export async function POST(req: NextRequest) {
     } else if (cleanEmail === 'annusraees@gmail.com') {
       defaultName = 'Annus Raees';
       defaultId = 'agent_annus_admin';
-    } else if (cleanEmail === 'jennifer.cisternino2027@gmail.com') {
-      defaultName = 'Murtuza Mehdi';
-      defaultId = 'agent_25mowqm';
-    }
-
-    // Check if agent was explicitly rejected/removed
-    const isRejected = await granularStore.isAgentRejected(cleanEmail);
-    if (isRejected && !isAdmin) {
-      return NextResponse.json({
-        success: false,
-        error: 'Agent access revoked by administrator',
-        status: 'rejected'
-      }, { status: 403 });
     }
 
     let agent = (await granularStore.getAgent(cleanEmail)) || granularStore.agents.get(cleanEmail) || undefined;
@@ -44,7 +31,7 @@ export async function POST(req: NextRequest) {
       agent = {
         id: defaultId,
         email: cleanEmail,
-        full_name: fullName || defaultName || cleanEmail.split('@')[0],
+        full_name: fullName || defaultName,
         phone: phone || '+1 (555) 019-2834',
         role: isAdmin ? 'admin' : (role || 'agent'),
         status: 'approved',
@@ -53,20 +40,18 @@ export async function POST(req: NextRequest) {
         created_at: nowIso
       };
     } else {
+      agent.status = 'approved';
       agent.is_online = true;
       agent.last_seen_at = nowIso;
       if (isAdmin) {
         agent.role = 'admin';
-        agent.status = 'approved';
-      } else if (agent.status !== 'rejected') {
-        agent.status = 'approved';
       }
-      if (fullName) agent.full_name = fullName;
+      if (fullName && fullName.trim()) agent.full_name = fullName.trim();
     }
 
     await granularStore.saveAgent(agent);
 
-    return NextResponse.json({ success: true, agent, status: agent.status });
+    return NextResponse.json({ success: true, agent, status: 'approved' });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Server error';
     return NextResponse.json({ error: message }, { status: 500 });
